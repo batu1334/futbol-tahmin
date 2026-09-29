@@ -197,10 +197,6 @@ export default function Home() {
       setBonusInput(inputMap);
     }
 
-    /*
-      URL ile doğrudan geldiysek bonus sorularını
-      burada da yükle.
-    */
     if (
       initialMatchId !== null &&
       Number.isInteger(initialMatchId)
@@ -528,12 +524,6 @@ export default function Home() {
       return;
     }
 
-    /*
-      Bonus cevap için maçın özellikle
-      'scheduled' olması şart değil.
-      Sadece maç bitmişse veya 10 dakika
-      sınırı geçmişse cevap engellenir.
-    */
     if (
       match.status === "finished"
     ) {
@@ -640,9 +630,6 @@ export default function Home() {
       "✅ Bonus cevabın kaydedildi!"
     );
 
-    /*
-      Cevabı tekrar yükle.
-    */
     await load(selectedMatchId);
   }
 
@@ -999,24 +986,31 @@ export default function Home() {
                           {question.question_type ===
                           "multiple_choice" ? (
                             <div className="mt-5 grid gap-3">
-                              {[
+                              {(
                                 [
-                                  "A",
-                                  question.option_a,
-                                ],
-                                [
-                                  "B",
-                                  question.option_b,
-                                ],
-                                [
-                                  "C",
-                                  question.option_c,
-                                ],
-                                [
-                                  "D",
-                                  question.option_d,
-                                ],
-                              ].map(
+                                  [
+                                    "A",
+                                    question.option_a,
+                                  ],
+                                  [
+                                    "B",
+                                    question.option_b,
+                                  ],
+                                  [
+                                    "C",
+                                    question.option_c,
+                                  ],
+                                  [
+                                    "D",
+                                    question.option_d,
+                                  ],
+                                ] as Array<
+                                  [
+                                    string,
+                                    string | null
+                                  ]
+                                >
+                              ).map(
                                 ([
                                   letter,
                                   option,

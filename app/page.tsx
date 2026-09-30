@@ -7,7 +7,8 @@ type Match = {
   id: number;
   home_team: string;
   away_team: string;
-  kickoff: string;
+  kickoff: string | null;
+  match_date?: string | null;
   league: string | null;
   status: string;
   home_score: number | null;
@@ -41,6 +42,7 @@ export default function HomePage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+
   const [matchFilter, setMatchFilter] = useState<
     "all" | "upcoming" | "finished"
   >("all");
@@ -80,17 +82,9 @@ export default function HomePage() {
           .maybeSingle(),
       ]);
 
-    if (matchesResult.error) {
-      console.error(matchesResult.error);
-    }
-
-    if (predictionsResult.error) {
-      console.error(predictionsResult.error);
-    }
-
-    if (bonusResult.error) {
-      console.error(bonusResult.error);
-    }
+    if (matchesResult.error) console.error(matchesResult.error);
+    if (predictionsResult.error) console.error(predictionsResult.error);
+    if (bonusResult.error) console.error(bonusResult.error);
 
     setMatches(matchesResult.data || []);
     setPredictions(predictionsResult.data || []);
@@ -212,23 +206,70 @@ export default function HomePage() {
     );
   };
 
-  const formatDate = (date: string) => {
-    return new Intl.DateTimeFormat("tr-TR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(date));
+  const formatDate = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (date) {
+      const parsed = new Date(date);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          weekday: "long",
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    if (matchDate) {
+      const parsed = new Date(`${matchDate}T00:00:00`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          weekday: "long",
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        }).format(parsed);
+      }
+    }
+
+    return "Tarih henüz belli değil";
   };
 
-  const formatShortDate = (date: string) => {
-    return new Intl.DateTimeFormat("tr-TR", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(date));
+  const formatShortDate = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (date) {
+      const parsed = new Date(date);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    if (matchDate) {
+      const parsed = new Date(`${matchDate}T00:00:00`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          day: "2-digit",
+          month: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    return "Saat yok";
   };
 
   const getTeamInitial = (team: string) => {
@@ -238,20 +279,13 @@ export default function HomePage() {
   const TeamLogo = ({
     url,
     team,
-    size = "normal",
   }: {
     url: string | null;
     team: string;
-    size?: "normal" | "small";
   }) => {
-    const logoClass =
-      size === "small" ? "h-14 w-14" : "h-20 w-20";
-
     if (url) {
       return (
-        <div
-          className={`flex ${logoClass} items-center justify-center rounded-2xl border border-slate-100 bg-white p-2 shadow-sm`}
-        >
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:h-20 sm:w-20">
           <img
             src={url}
             alt={`${team} logosu`}
@@ -262,11 +296,7 @@ export default function HomePage() {
     }
 
     return (
-      <div
-        className={`flex ${logoClass} items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 font-black text-slate-400 ${
-          size === "small" ? "text-xl" : "text-2xl"
-        }`}
-      >
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-xl font-bold text-slate-400 shadow-sm sm:h-20 sm:w-20">
         {getTeamInitial(team)}
       </div>
     );
@@ -305,14 +335,30 @@ export default function HomePage() {
         ? finishedMatches
         : matches;
 
+  const confirmedUpcoming = upcomingMatches.filter(
+    (match) => match.schedule_confirmed && match.kickoff
+  ).length;
+
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50">
+      <main
+        className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900"
+        style={{
+          fontFamily:
+            'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        }}
+      >
         <div className="text-center">
-          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#0f2747] text-3xl shadow-lg">
+            ⚽
+          </div>
 
-          <p className="mt-4 font-bold text-slate-600">
-            Yükleniyor...
+          <div className="mx-auto mt-5 h-1.5 w-28 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-blue-600" />
+          </div>
+
+          <p className="mt-4 text-xs font-semibold tracking-widest text-slate-400">
+            YÜKLENİYOR
           </p>
         </div>
       </main>
@@ -320,34 +366,69 @@ export default function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50">
+    <main
+      className="min-h-screen overflow-x-hidden bg-[#f4f7fb] text-slate-900"
+      style={{
+        fontFamily:
+          'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <style jsx>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        button {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .page-title {
+          letter-spacing: -0.035em;
+        }
+
+        .nav-shadow {
+          box-shadow: 0 1px 0 rgba(15, 39, 71, 0.08);
+        }
+
+        .card-shadow {
+          box-shadow:
+            0 2px 8px rgba(15, 39, 71, 0.04),
+            0 12px 35px rgba(15, 39, 71, 0.06);
+        }
+
+        .hero-shadow {
+          box-shadow:
+            0 15px 45px rgba(15, 39, 71, 0.18);
+        }
+      `}</style>
+
       {menuOpen && (
         <button
           type="button"
           aria-label="Menüyü kapat"
           onClick={() => setMenuOpen(false)}
-          className="fixed inset-0 z-40 cursor-default bg-black/40"
+          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[2px]"
         />
       )}
 
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-2xl transition-transform duration-300 ${
+        className={`fixed left-0 top-0 z-50 flex h-full w-[290px] max-w-[88vw] flex-col bg-white shadow-2xl transition-transform duration-300 ${
           menuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-2xl text-white">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0f2747] text-xl">
               ⚽
             </div>
 
             <div>
-              <p className="font-black text-slate-900">
+              <p className="page-title text-base font-extrabold text-[#0f2747]">
                 Futbol Tahmin
               </p>
 
-              <p className="text-xs font-bold text-blue-600">
-                Menü
+              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-blue-600">
+                Tahmin Platformu
               </p>
             </div>
           </div>
@@ -355,60 +436,62 @@ export default function HomePage() {
           <button
             type="button"
             onClick={() => setMenuOpen(false)}
-            className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 hover:bg-slate-200"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-lg font-semibold text-slate-500"
           >
             ✕
           </button>
         </div>
 
-        <div className="border-b border-slate-100 px-5 py-5">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Hesap
-          </p>
+        <div className="border-b border-slate-100 p-5">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Oyuncu
+            </p>
 
-          <p className="mt-1 truncate font-black text-slate-900">
-            {profile.display_name || "Oyuncu"}
-          </p>
+            <p className="mt-2 truncate text-base font-bold text-[#0f2747]">
+              {profile.display_name || "Oyuncu"}
+            </p>
 
-          <p className="mt-1 truncate text-sm text-slate-500">
-            {email}
-          </p>
+            <p className="mt-1 truncate text-xs text-slate-400">
+              {email}
+            </p>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 py-5">
           <button
             type="button"
             onClick={() => goTo("/")}
-            className="mb-2 flex w-full items-center gap-3 rounded-2xl bg-blue-50 px-4 py-4 text-left font-black text-blue-700"
+            className="mb-1 flex w-full items-center gap-3 rounded-xl bg-[#0f2747] px-4 py-3.5 text-left text-sm font-bold text-white"
           >
-            <span className="text-xl">🏠</span>
+            <span>🏠</span>
             <span>Ana Sayfa</span>
           </button>
 
           <button
             type="button"
             onClick={() => goTo("/tahmin")}
-            className="mb-2 flex w-full items-center gap-3 rounded-2xl px-4 py-4 text-left font-black text-slate-700 hover:bg-slate-100"
+            className="mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
           >
-            <span className="text-xl">⚽</span>
+            <span>🎯</span>
             <span>Tahminler</span>
           </button>
 
           <button
             type="button"
             onClick={() => goTo("/siralama")}
-            className="mb-2 flex w-full items-center gap-3 rounded-2xl px-4 py-4 text-left font-black text-slate-700 hover:bg-slate-100"
+            className="mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
           >
-            <span className="text-xl">🏆</span>
+            <span>🏆</span>
             <span>Sıralama</span>
           </button>
 
           <button
             type="button"
             onClick={() => goTo("/profil")}
-            className="mb-2 flex w-full items-center gap-3 rounded-2xl px-4 py-4 text-left font-black text-slate-700 hover:bg-slate-100"
+            className="mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
           >
-            <span className="text-xl">👤</span>
+            <span>👤</span>
             <span>Profil</span>
           </button>
 
@@ -416,9 +499,9 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => goTo("/admin")}
-              className="mb-2 flex w-full items-center gap-3 rounded-2xl bg-red-50 px-4 py-4 text-left font-black text-red-700 hover:bg-red-100"
+              className="mb-1 flex w-full items-center gap-3 rounded-xl bg-red-50 px-4 py-3.5 text-left text-sm font-semibold text-red-600"
             >
-              <span className="text-xl">⚙️</span>
+              <span>⚙️</span>
               <span>Admin Paneli</span>
             </button>
           )}
@@ -428,48 +511,48 @@ export default function HomePage() {
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-4 font-black text-white hover:bg-red-700"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-red-700"
           >
             <span>🚪</span>
-            <span>Çıkış Yap</span>
+            Çıkış Yap
           </button>
         </div>
       </aside>
 
-      <header className="border-b border-blue-100 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 nav-shadow backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setMenuOpen(true)}
               aria-label="Menüyü aç"
-              className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-2xl font-black text-slate-700 hover:bg-slate-200"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-bold text-[#0f2747]"
             >
               ☰
             </button>
 
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-2xl text-white">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f2747] text-xl sm:flex">
                 ⚽
               </div>
 
-              <div>
-                <h1 className="font-black text-slate-900">
-                  Futbol Tahmin
+              <div className="min-w-0">
+                <h1 className="page-title truncate text-base font-extrabold text-[#0f2747] sm:text-lg">
+                  FUTBOL TAHMİN
                 </h1>
 
-                <p className="text-xs font-bold text-blue-600">
-                  Tahmin Platformu
+                <p className="truncate text-[9px] font-semibold uppercase tracking-wider text-blue-600">
+                  Tahmin platformu
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => (window.location.href = "/tahmin")}
-              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700"
+              className="rounded-xl bg-blue-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 sm:px-4 sm:text-sm"
             >
               🎯 Tahmin
             </button>
@@ -477,7 +560,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => (window.location.href = "/siralama")}
-              className="hidden rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-700 hover:bg-blue-100 sm:block"
+              className="hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 sm:block"
             >
               🏆 Sıralama
             </button>
@@ -485,7 +568,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => (window.location.href = "/profil")}
-              className="hidden rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-200 sm:block"
+              className="hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 sm:block"
             >
               👤 Profil
             </button>
@@ -494,7 +577,7 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => (window.location.href = "/admin")}
-                className="hidden rounded-xl bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 hover:bg-red-100 md:block"
+                className="hidden rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 md:block"
               >
                 ⚙️ Admin
               </button>
@@ -503,7 +586,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white hover:bg-red-700"
+              className="hidden rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white sm:block"
             >
               Çıkış
             </button>
@@ -511,100 +594,169 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <section className="rounded-3xl bg-gradient-to-br from-blue-600 to-blue-900 p-7 text-white shadow-xl sm:p-10">
-          <p className="text-sm font-bold text-blue-200">
-            Hoş geldin
-          </p>
+      <div className="mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-7 lg:px-8">
+        <section className="hero-shadow overflow-hidden rounded-2xl bg-[#0f2747] sm:rounded-3xl">
+          <div className="relative px-5 py-7 sm:px-8 sm:py-9 lg:px-10">
+            <div className="absolute right-[-80px] top-[-100px] h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
 
-          <h2 className="mt-2 text-4xl font-black">
-            {profile.display_name || "Oyuncu"}
-          </h2>
+            <div className="relative">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-200">
+                  Hoş Geldin
+                </span>
 
-          <p className="mt-2 text-sm text-blue-100">
-            {email}
-          </p>
+                {confirmedUpcoming > 0 && (
+                  <span className="rounded-full bg-emerald-400/15 px-3 py-1.5 text-[10px] font-bold text-emerald-200">
+                    {confirmedUpcoming} maç tahmine açık
+                  </span>
+                )}
+              </div>
 
-          <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-2xl bg-white/10 p-5">
-              <p className="text-xs font-bold text-blue-200">
-                Toplam Puan
+              <h2 className="page-title mt-4 max-w-2xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
+                {profile.display_name || "Oyuncu"}
+              </h2>
+
+              <p className="mt-2 text-2xl font-bold text-blue-300 sm:text-3xl">
+                Maçını seç, tahminini yap.
               </p>
 
-              <p className="mt-2 text-3xl font-black">
-                {totalPoints}
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-white/10 p-5">
-              <p className="text-xs font-bold text-blue-200">
-                Tahmin
+              <p className="mt-4 max-w-xl text-sm leading-6 text-slate-300 sm:text-base">
+                Maçları takip et, doğru skorları yakala ve puan
+                tablosunda yüksel.
               </p>
 
-              <p className="mt-2 text-3xl font-black">
-                {predictions.length}
-              </p>
-            </div>
+              <div className="mt-6 flex flex-col gap-2.5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => (window.location.href = "/tahmin")}
+                  className="rounded-xl bg-white px-5 py-3.5 text-sm font-bold text-[#0f2747] shadow-sm transition hover:bg-slate-100"
+                >
+                  🎯 Tahmin Yap
+                </button>
 
-            <div className="rounded-2xl bg-white/10 p-5">
-              <p className="text-xs font-bold text-blue-200">
-                Tam İsabet
-              </p>
-
-              <p className="mt-2 text-3xl font-black">
-                {exactScores}
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-white/10 p-5">
-              <p className="text-xs font-bold text-blue-200">
-                Bonus Puanı
-              </p>
-
-              <p className="mt-2 text-3xl font-black">
-                {bonusPoints}
-              </p>
+                <button
+                  type="button"
+                  onClick={() => (window.location.href = "/siralama")}
+                  className="rounded-xl border border-white/20 bg-white/10 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-white/15"
+                >
+                  🏆 Sıralamayı Gör
+                </button>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="mt-8">
+        <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:grid-cols-4">
+          <div className="card-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Toplam Puan
+              </p>
+
+              <span className="text-lg">⚡</span>
+            </div>
+
+            <p className="mt-3 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
+              {totalPoints}
+            </p>
+
+            <p className="mt-1 text-[10px] font-medium text-blue-600">
+              Genel skor
+            </p>
+          </div>
+
+          <div className="card-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Tahmin
+              </p>
+
+              <span className="text-lg">🎯</span>
+            </div>
+
+            <p className="mt-3 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
+              {predictions.length}
+            </p>
+
+            <p className="mt-1 text-[10px] font-medium text-slate-400">
+              Yapılan tahmin
+            </p>
+          </div>
+
+          <div className="card-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Tam İsabet
+              </p>
+
+              <span className="text-lg">🎯</span>
+            </div>
+
+            <p className="mt-3 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
+              {exactScores}
+            </p>
+
+            <p className="mt-1 text-[10px] font-medium text-slate-400">
+              20 puanlık skor
+            </p>
+          </div>
+
+          <div className="card-shadow rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Bonus
+              </p>
+
+              <span className="text-lg">🔥</span>
+            </div>
+
+            <p className="mt-3 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
+              {bonusPoints}
+            </p>
+
+            <p className="mt-1 text-[10px] font-medium text-slate-400">
+              Bonus puanı
+            </p>
+          </div>
+        </section>
+
+        <section className="mt-8 sm:mt-10">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-wider text-blue-600">
+              <p className="text-xs font-bold uppercase tracking-widest text-blue-600">
                 Maç Merkezi
               </p>
 
-              <h2 className="mt-1 text-3xl font-black text-slate-900">
+              <h2 className="page-title mt-1 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
                 Maçlar
               </h2>
 
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Tüm maçları ve tahminlerini buradan takip edebilirsin.
+              <p className="mt-1 text-sm text-slate-500">
+                Maçları ve tahminlerini buradan takip edebilirsin.
               </p>
             </div>
 
             <button
               type="button"
               onClick={() => (window.location.href = "/tahmin")}
-              className="rounded-xl bg-blue-600 px-5 py-3 font-black text-white hover:bg-blue-700"
+              className="self-start rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100 sm:self-auto"
             >
-              🎯 Tahmin Sayfası
+              Tüm tahminler →
             </button>
           </div>
 
-          <div className="mt-6 grid grid-cols-3 gap-2 rounded-2xl bg-white p-2 shadow-sm">
+          <div className="mt-5 grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
             <button
               type="button"
               onClick={() => setMatchFilter("all")}
-              className={`rounded-xl px-3 py-3 text-sm font-black transition ${
+              className={`rounded-lg px-2 py-3 text-xs font-bold transition sm:text-sm ${
                 matchFilter === "all"
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-500 hover:bg-slate-100"
+                  ? "bg-[#0f2747] text-white shadow-sm"
+                  : "text-slate-500 hover:bg-slate-50"
               }`}
             >
               Tümü
-              <span className="ml-1 opacity-80">
+              <span className="ml-1 opacity-70">
                 ({matches.length})
               </span>
             </button>
@@ -612,14 +764,14 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setMatchFilter("upcoming")}
-              className={`rounded-xl px-3 py-3 text-sm font-black transition ${
+              className={`rounded-lg px-2 py-3 text-xs font-bold transition sm:text-sm ${
                 matchFilter === "upcoming"
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-500 hover:bg-slate-100"
+                  ? "bg-[#0f2747] text-white shadow-sm"
+                  : "text-slate-500 hover:bg-slate-50"
               }`}
             >
               Yaklaşan
-              <span className="ml-1 opacity-80">
+              <span className="ml-1 opacity-70">
                 ({upcomingMatches.length})
               </span>
             </button>
@@ -627,131 +779,158 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setMatchFilter("finished")}
-              className={`rounded-xl px-3 py-3 text-sm font-black transition ${
+              className={`rounded-lg px-2 py-3 text-xs font-bold transition sm:text-sm ${
                 matchFilter === "finished"
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-500 hover:bg-slate-100"
+                  ? "bg-[#0f2747] text-white shadow-sm"
+                  : "text-slate-500 hover:bg-slate-50"
               }`}
             >
               Biten
-              <span className="ml-1 opacity-80">
+              <span className="ml-1 opacity-70">
                 ({finishedMatches.length})
               </span>
             </button>
           </div>
 
           {filteredMatches.length === 0 ? (
-            <div className="mt-5 rounded-3xl bg-white p-10 text-center shadow-sm">
-              <div className="text-5xl">⚽</div>
+            <div className="card-shadow mt-4 rounded-2xl border border-slate-200 bg-white p-10 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">
+                ⚽
+              </div>
 
-              <p className="mt-4 font-bold text-slate-500">
+              <p className="mt-4 text-sm font-semibold text-slate-500">
                 Bu kategoride maç bulunmuyor.
               </p>
             </div>
           ) : (
-            <div className="mt-5 space-y-4">
+            <div className="mt-4 space-y-4">
               {filteredMatches.map((match) => {
                 const prediction = getPrediction(match.id);
                 const isFinished = match.status === "finished";
                 const isCancelled = match.status === "cancelled";
 
+                const canPredict =
+                  !isFinished &&
+                  !isCancelled &&
+                  match.schedule_confirmed &&
+                  Boolean(match.kickoff);
+
                 return (
                   <article
                     key={match.id}
-                    className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm transition hover:shadow-md"
+                    className="card-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white"
                   >
-                    <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">
-                            {match.league || "Futbol"}
-                          </span>
-
-                          {isFinished && (
-                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
-                              Tamamlandı
+                    <div className="border-b border-slate-100 px-4 py-4 sm:px-6">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-md bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+                              {match.league || "Futbol"}
                             </span>
-                          )}
 
-                          {isCancelled && (
-                            <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-black text-red-700">
-                              İptal
-                            </span>
-                          )}
+                            {isFinished && (
+                              <span className="rounded-md bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                                ✓ Tamamlandı
+                              </span>
+                            )}
 
-                          {!isFinished && !isCancelled && (
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-black ${
-                                match.schedule_confirmed
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-amber-100 text-amber-700"
-                              }`}
-                            >
-                              {match.schedule_confirmed
-                                ? "Onaylı"
-                                : "Bekliyor"}
-                            </span>
-                          )}
+                            {isCancelled && (
+                              <span className="rounded-md bg-red-50 px-2.5 py-1 text-[10px] font-bold text-red-600">
+                                ✕ İptal
+                              </span>
+                            )}
+
+                            {!isFinished && !isCancelled && (
+                              <span
+                                className={`rounded-md px-2.5 py-1 text-[10px] font-bold ${
+                                  match.schedule_confirmed &&
+                                  match.kickoff
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {match.schedule_confirmed &&
+                                match.kickoff
+                                  ? "Program Onaylı"
+                                  : "Saat Bekleniyor"}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-2 text-xs font-medium capitalize text-slate-400">
+                            {formatDate(
+                              match.kickoff,
+                              match.match_date
+                            )}
+                          </p>
                         </div>
 
-                        <p className="mt-2 text-sm font-bold text-slate-500">
-                          {formatDate(match.kickoff)}
-                        </p>
-                      </div>
+                        <div className="self-start rounded-xl bg-slate-50 px-3.5 py-2.5 text-left sm:self-auto sm:text-center">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                            Maç zamanı
+                          </p>
 
-                      <div className="rounded-xl bg-white px-3 py-2 text-center shadow-sm">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                          Maç Saati
-                        </p>
-
-                        <p className="mt-1 font-black text-blue-700">
-                          {formatShortDate(match.kickoff)}
-                        </p>
+                          <p className="mt-1 text-sm font-bold text-[#0f2747]">
+                            {formatShortDate(
+                              match.kickoff,
+                              match.match_date
+                            )}
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="p-5">
-                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-6">
+                    <div className="px-4 py-5 sm:px-7 sm:py-7">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 sm:gap-8">
                         <div className="flex min-w-0 flex-col items-center text-center">
                           <TeamLogo
                             url={match.home_logo_url}
                             team={match.home_team}
                           />
 
-                          <p className="mt-3 w-full break-words font-black text-slate-900">
+                          <p className="mt-3 w-full break-words text-sm font-bold leading-5 text-[#0f2747] sm:text-base">
                             {match.home_team}
                           </p>
 
-                          <p className="mt-1 text-xs font-bold text-slate-400">
+                          <p className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-slate-400">
                             Ev Sahibi
                           </p>
                         </div>
 
-                        <div className="text-center">
+                        <div className="flex min-w-[52px] flex-col items-center pt-3 text-center sm:pt-5">
                           {isFinished ? (
-                            <div>
-                              <div className="rounded-2xl bg-slate-100 px-5 py-3 text-2xl font-black text-slate-900">
-                                {match.home_score ?? "-"}{" "}
-                                -{" "}
-                                {match.away_score ?? "-"}
+                            <>
+                              <div className="rounded-xl bg-[#0f2747] px-3.5 py-2.5 sm:px-5">
+                                <p className="text-xl font-extrabold text-white sm:text-2xl">
+                                  {match.home_score ?? "-"}
+                                  <span className="mx-1 text-slate-400">
+                                    -
+                                  </span>
+                                  {match.away_score ?? "-"}
+                                </p>
                               </div>
 
                               {prediction && (
-                                <div className="mt-2">
-                                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
-                                    Tahmin:{" "}
-                                    {prediction.home_score} -{" "}
+                                <div className="mt-3 text-center">
+                                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[9px] font-bold text-blue-700">
+                                    Tahmin {prediction.home_score}-
                                     {prediction.away_score}
                                   </span>
 
-                                  <p className="mt-2 text-xs font-black text-emerald-600">
+                                  <p
+                                    className={`mt-2 text-xs font-bold ${
+                                      prediction.points > 0
+                                        ? "text-emerald-600"
+                                        : "text-slate-400"
+                                    }`}
+                                  >
                                     +{prediction.points} puan
                                   </p>
                                 </div>
                               )}
-                            </div>
+                            </>
                           ) : (
-                            <div className="rounded-xl bg-blue-50 px-4 py-3 font-black text-blue-600">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-[11px] font-extrabold text-slate-500 sm:h-11 sm:w-11">
                               VS
                             </div>
                           )}
@@ -763,27 +942,30 @@ export default function HomePage() {
                             team={match.away_team}
                           />
 
-                          <p className="mt-3 w-full break-words font-black text-slate-900">
+                          <p className="mt-3 w-full break-words text-sm font-bold leading-5 text-[#0f2747] sm:text-base">
                             {match.away_team}
                           </p>
 
-                          <p className="mt-1 text-xs font-bold text-slate-400">
+                          <p className="mt-1 text-[9px] font-semibold uppercase tracking-wider text-slate-400">
                             Deplasman
                           </p>
                         </div>
                       </div>
 
                       {!isFinished && !isCancelled && (
-                        <div className="mt-5">
+                        <div className="mt-6">
                           {prediction ? (
-                            <div className="flex flex-col gap-3 rounded-2xl bg-blue-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-col gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
                               <div>
-                                <p className="text-xs font-black uppercase tracking-wider text-blue-500">
+                                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-600">
                                   Senin Tahminin
                                 </p>
 
-                                <p className="mt-1 text-xl font-black text-blue-800">
-                                  {prediction.home_score} -{" "}
+                                <p className="mt-1 text-xl font-extrabold text-[#0f2747]">
+                                  {prediction.home_score}
+                                  <span className="mx-1 text-slate-400">
+                                    -
+                                  </span>
                                   {prediction.away_score}
                                 </p>
                               </div>
@@ -794,22 +976,33 @@ export default function HomePage() {
                                   (window.location.href =
                                     `/tahmin?match=${match.id}`)
                                 }
-                                className="rounded-xl bg-blue-600 px-5 py-3 font-black text-white hover:bg-blue-700"
+                                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 sm:w-auto"
                               >
                                 Tahmini Gör / Değiştir
                               </button>
                             </div>
-                          ) : (
+                          ) : canPredict ? (
                             <button
                               type="button"
                               onClick={() =>
                                 (window.location.href =
                                   `/tahmin?match=${match.id}`)
                               }
-                              className="w-full rounded-xl bg-blue-600 px-4 py-3.5 font-black text-white hover:bg-blue-700"
+                              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
                             >
                               🎯 Bu Maçı Tahmin Et
+                              <span>→</span>
                             </button>
+                          ) : (
+                            <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3.5 text-center">
+                              <p className="text-xs font-bold text-amber-700">
+                                ⏳ Maç saati henüz onaylanmadı
+                              </p>
+
+                              <p className="mt-1 text-[10px] font-medium text-amber-600/70">
+                                Tahminler maç saati kesinleşince açılacak.
+                              </p>
+                            </div>
                           )}
                         </div>
                       )}
@@ -820,6 +1013,12 @@ export default function HomePage() {
             </div>
           )}
         </section>
+
+        <footer className="py-8 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            ⚽ Futbol Tahmin • Kendi tahminini yap
+          </p>
+        </footer>
       </div>
     </main>
   );

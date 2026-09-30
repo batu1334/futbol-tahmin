@@ -16,6 +16,16 @@ type Match = {
   schedule_confirmed: boolean;
   home_logo_url: string | null;
   away_logo_url: string | null;
+
+  // Yayıncı için olası kolon isimleri
+  broadcaster?: string | null;
+  broadcast_channel?: string | null;
+  channel?: string | null;
+  tv_channel?: string | null;
+  yayinci?: string | null;
+  yayinci_kanal?: string | null;
+
+  [key: string]: unknown;
 };
 
 type Prediction = {
@@ -50,6 +60,8 @@ export default function HomePage() {
   >("all");
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
 
   const [profile, setProfile] = useState<Profile>({
     display_name: "Oyuncu",
@@ -90,7 +102,7 @@ export default function HomePage() {
     if (predictionsResult.error) console.error(predictionsResult.error);
     if (bonusResult.error) console.error(bonusResult.error);
 
-    setMatches(matchesResult.data || []);
+    setMatches((matchesResult.data || []) as Match[]);
     setPredictions(predictionsResult.data || []);
     setBonusAnswers(bonusResult.data || []);
 
@@ -199,6 +211,26 @@ export default function HomePage() {
     };
   }, [userId]);
 
+  useEffect(() => {
+    if (!selectedMatch) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedMatch(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [selectedMatch]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut({
       scope: "local",
@@ -224,6 +256,39 @@ export default function HomePage() {
     return predictions.find(
       (prediction) => prediction.match_id === matchId
     );
+  };
+
+  const openMatchDetails = (match: Match) => {
+    setSelectedMatch(match);
+  };
+
+  const getBroadcaster = (match: Match) => {
+    const possibleKeys = [
+      "broadcaster",
+      "broadcast_channel",
+      "broadcast",
+      "channel",
+      "tv_channel",
+      "tv",
+      "yayinci",
+      "yayinci_kanal",
+      "yayinci_bilgisi",
+      "yayıncı",
+      "yayıncı_kanal",
+    ];
+
+    for (const key of possibleKeys) {
+      const value = match[key];
+
+      if (
+        typeof value === "string" &&
+        value.trim().length > 0
+      ) {
+        return value.trim();
+      }
+    }
+
+    return null;
   };
 
   const formatDate = (
@@ -341,6 +406,57 @@ export default function HomePage() {
     }
 
     return "";
+  };
+
+  const formatOnlyDate = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (date) {
+      const parsed = new Date(date);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          weekday: "long",
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        }).format(parsed);
+      }
+    }
+
+    if (matchDate) {
+      const parsed = new Date(`${matchDate}T00:00:00`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          weekday: "long",
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        }).format(parsed);
+      }
+    }
+
+    return "Tarih belli değil";
+  };
+
+  const formatOnlyTime = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (!date) return "Saat belli değil";
+
+    const parsed = new Date(date);
+
+    if (Number.isNaN(parsed.getTime())) {
+      return "Saat belli değil";
+    }
+
+    return new Intl.DateTimeFormat("tr-TR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(parsed);
   };
 
   const getTeamInitial = (team: string) => {
@@ -467,6 +583,27 @@ export default function HomePage() {
     );
   }
 
+  const selectedPrediction = selectedMatch
+    ? getPrediction(selectedMatch.id)
+    : null;
+
+  const selectedIsFinished =
+    selectedMatch?.status === "finished";
+
+  const selectedIsCancelled =
+    selectedMatch?.status === "cancelled";
+
+  const selectedCanPredict =
+    Boolean(selectedMatch) &&
+    !selectedIsFinished &&
+    !selectedIsCancelled &&
+    Boolean(selectedMatch?.schedule_confirmed) &&
+    Boolean(selectedMatch?.kickoff);
+
+  const selectedBroadcaster = selectedMatch
+    ? getBroadcaster(selectedMatch)
+    : null;
+
   return (
     <main
       className="min-h-screen overflow-x-hidden bg-[#f4f7fb] text-slate-900"
@@ -506,10 +643,19 @@ export default function HomePage() {
           transition:
             background-color 0.15s ease,
             transform 0.15s ease;
+          cursor: pointer;
         }
 
         .list-row:hover {
           background-color: #f8fafc;
+        }
+
+        .match-clickable {
+          cursor: pointer;
+        }
+
+        .match-clickable:hover {
+          border-color: #bfdbfe;
         }
       `}</style>
 
@@ -839,7 +985,8 @@ export default function HomePage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Maçları ve tahminlerini buradan takip edebilirsin.
+                Maça tıklayarak tarih, saat ve yayıncı bilgilerini
+                görebilirsin.
               </p>
             </div>
 
@@ -899,7 +1046,6 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* GÖRÜNÜM SEÇİCİ */}
           <div className="mt-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
             <div className="px-3">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -947,9 +1093,6 @@ export default function HomePage() {
               </p>
             </div>
           ) : viewMode === "cards" ? (
-            /* =========================================================
-               KART GÖRÜNÜMÜ
-            ========================================================= */
             <div className="mt-4 space-y-4">
               {filteredMatches.map((match) => {
                 const prediction = getPrediction(match.id);
@@ -965,7 +1108,8 @@ export default function HomePage() {
                 return (
                   <article
                     key={match.id}
-                    className="card-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                    onClick={() => openMatchDetails(match)}
+                    className="card-shadow match-clickable overflow-hidden rounded-2xl border border-slate-200 bg-white transition"
                   >
                     <div className="border-b border-slate-100 px-4 py-4 sm:px-6">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1099,8 +1243,15 @@ export default function HomePage() {
                         </div>
                       </div>
 
+                      <div className="mt-5 flex items-center justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                        <span className="text-xs">ℹ️</span>
+                        <span className="text-[10px] font-bold text-slate-500">
+                          Maç detayları için tıkla
+                        </span>
+                      </div>
+
                       {!isFinished && !isCancelled && (
-                        <div className="mt-6">
+                        <div className="mt-3">
                           {prediction ? (
                             <div className="flex flex-col gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
                               <div>
@@ -1119,10 +1270,10 @@ export default function HomePage() {
 
                               <button
                                 type="button"
-                                onClick={() =>
-                                  (window.location.href =
-                                    `/tahmin?match=${match.id}`)
-                                }
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  window.location.href = `/tahmin?match=${match.id}`;
+                                }}
                                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 sm:w-auto"
                               >
                                 Tahmini Gör / Değiştir
@@ -1131,10 +1282,10 @@ export default function HomePage() {
                           ) : canPredict ? (
                             <button
                               type="button"
-                              onClick={() =>
-                                (window.location.href =
-                                  `/tahmin?match=${match.id}`)
-                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                window.location.href = `/tahmin?match=${match.id}`;
+                              }}
                               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
                             >
                               🎯 Bu Maçı Tahmin Et
@@ -1159,16 +1310,12 @@ export default function HomePage() {
               })}
             </div>
           ) : (
-            /* =========================================================
-               LİSTE GÖRÜNÜMÜ
-            ========================================================= */
             <div className="mt-4 space-y-4">
               {leagueGroups.map(([league, leagueMatches]) => (
                 <section
                   key={league}
                   className="card-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white"
                 >
-                  {/* LİG BAŞLIĞI */}
                   <div className="flex items-center justify-between border-b border-slate-200 bg-[#0f2747] px-4 py-3.5 sm:px-5">
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm">
@@ -1191,7 +1338,6 @@ export default function HomePage() {
                     </span>
                   </div>
 
-                  {/* LİSTE */}
                   <div className="divide-y divide-slate-100">
                     {leagueMatches.map((match) => {
                       const prediction = getPrediction(match.id);
@@ -1209,11 +1355,10 @@ export default function HomePage() {
                       return (
                         <div
                           key={match.id}
+                          onClick={() => openMatchDetails(match)}
                           className="list-row px-3 py-3.5 sm:px-5 sm:py-4"
                         >
-                          {/* MASAÜSTÜ / GENİŞ */}
                           <div className="hidden items-center gap-4 md:grid md:grid-cols-[80px_minmax(0,1fr)_90px_minmax(0,1fr)_auto]">
-                            {/* TARİH / SAAT */}
                             <div className="text-center">
                               <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
                                 Tarih
@@ -1234,7 +1379,6 @@ export default function HomePage() {
                               </p>
                             </div>
 
-                            {/* EV */}
                             <div className="flex min-w-0 items-center justify-end gap-3">
                               <p className="truncate text-right text-sm font-bold text-[#0f2747]">
                                 {match.home_team}
@@ -1247,7 +1391,6 @@ export default function HomePage() {
                               />
                             </div>
 
-                            {/* SKOR */}
                             <div className="flex flex-col items-center">
                               {isFinished ? (
                                 <div className="rounded-lg bg-[#0f2747] px-3 py-2">
@@ -1277,7 +1420,6 @@ export default function HomePage() {
                               )}
                             </div>
 
-                            {/* DEPLASMAN */}
                             <div className="flex min-w-0 items-center justify-start gap-3">
                               <TeamLogo
                                 url={match.away_logo_url}
@@ -1290,7 +1432,6 @@ export default function HomePage() {
                               </p>
                             </div>
 
-                            {/* AKSİYON */}
                             <div className="flex justify-end">
                               {isFinished ? (
                                 prediction ? (
@@ -1311,16 +1452,16 @@ export default function HomePage() {
                                   </div>
                                 ) : (
                                   <span className="text-[10px] font-semibold text-slate-400">
-                                    —
+                                    Detay →
                                   </span>
                                 )
                               ) : canPredict ? (
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    (window.location.href =
-                                      `/tahmin?match=${match.id}`)
-                                  }
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    window.location.href = `/tahmin?match=${match.id}`;
+                                  }}
                                   className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-blue-700"
                                 >
                                   {prediction
@@ -1335,7 +1476,6 @@ export default function HomePage() {
                             </div>
                           </div>
 
-                          {/* MOBİL */}
                           <div className="md:hidden">
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-[58px] text-center">
@@ -1448,10 +1588,10 @@ export default function HomePage() {
                                 canPredict && (
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      (window.location.href =
-                                        `/tahmin?match=${match.id}`)
-                                    }
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      window.location.href = `/tahmin?match=${match.id}`;
+                                    }}
                                     className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-bold text-white shadow-sm transition hover:bg-blue-700"
                                   >
                                     {prediction
@@ -1463,6 +1603,12 @@ export default function HomePage() {
                               {isCancelled && (
                                 <span className="rounded-lg bg-red-50 px-3 py-2 text-[9px] font-bold text-red-600">
                                   İptal
+                                </span>
+                              )}
+
+                              {!isCancelled && !canPredict && !isFinished && (
+                                <span className="text-[9px] font-bold text-slate-400">
+                                  Detay için dokun →
                                 </span>
                               )}
                             </div>
@@ -1483,6 +1629,272 @@ export default function HomePage() {
           </p>
         </footer>
       </div>
+
+      {/* =========================================================
+          MAÇ DETAY MODALI
+      ========================================================= */}
+      {selectedMatch && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          onClick={() => setSelectedMatch(null)}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-3xl"
+          >
+            {/* MODAL HEADER */}
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-6">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600">
+                  Maç Detayları
+                </p>
+
+                <p className="mt-1 text-sm font-extrabold text-[#0f2747]">
+                  {selectedMatch.league || "Futbol"}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedMatch(null)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-lg font-bold text-slate-500 transition hover:bg-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-7">
+              {/* TAKIMLAR */}
+              <div className="rounded-2xl bg-[#0f2747] p-5 sm:p-7">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                    <div className="rounded-2xl bg-white p-2 shadow-sm">
+                      <TeamLogo
+                        url={selectedMatch.home_logo_url}
+                        team={selectedMatch.home_team}
+                      />
+                    </div>
+
+                    <p className="mt-3 break-words text-sm font-extrabold leading-5 text-white sm:text-base">
+                      {selectedMatch.home_team}
+                    </p>
+
+                    <p className="mt-1 text-[9px] font-semibold uppercase tracking-widest text-slate-400">
+                      Ev Sahibi
+                    </p>
+                  </div>
+
+                  <div className="flex min-w-[75px] flex-col items-center">
+                    {selectedIsFinished ? (
+                      <div className="rounded-xl bg-white px-4 py-3">
+                        <p className="text-2xl font-extrabold text-[#0f2747]">
+                          {selectedMatch.home_score ?? "-"}
+                          <span className="mx-1 text-slate-400">
+                            -
+                          </span>
+                          {selectedMatch.away_score ?? "-"}
+                        </p>
+                      </div>
+                    ) : selectedIsCancelled ? (
+                      <div className="rounded-xl bg-red-500 px-3 py-2">
+                        <p className="text-xs font-extrabold text-white">
+                          İPTAL
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
+                        <span className="text-xs font-extrabold text-white">
+                          VS
+                        </span>
+                      </div>
+                    )}
+
+                    <p className="mt-2 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      {selectedIsFinished
+                        ? "Maç Sonucu"
+                        : selectedIsCancelled
+                          ? "İptal"
+                          : "Karşılaşma"}
+                    </p>
+                  </div>
+
+                  <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                    <div className="rounded-2xl bg-white p-2 shadow-sm">
+                      <TeamLogo
+                        url={selectedMatch.away_logo_url}
+                        team={selectedMatch.away_team}
+                      />
+                    </div>
+
+                    <p className="mt-3 break-words text-sm font-extrabold leading-5 text-white sm:text-base">
+                      {selectedMatch.away_team}
+                    </p>
+
+                    <p className="mt-1 text-[9px] font-semibold uppercase tracking-widest text-slate-400">
+                      Deplasman
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* TARİH / SAAT / YAYINCI */}
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📅</span>
+
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      Tarih
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-sm font-extrabold capitalize text-[#0f2747]">
+                    {formatOnlyDate(
+                      selectedMatch.kickoff,
+                      selectedMatch.match_date
+                    )}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🕐</span>
+
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      Saat
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-lg font-extrabold text-blue-600">
+                    {formatOnlyTime(selectedMatch.kickoff)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📺</span>
+
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      Yayıncı
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-sm font-extrabold text-[#0f2747]">
+                    {selectedBroadcaster || "Yayıncı bilgisi yok"}
+                  </p>
+                </div>
+              </div>
+
+              {/* DURUM */}
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      Maç Durumu
+                    </p>
+
+                    <p className="mt-1 text-sm font-extrabold capitalize text-[#0f2747]">
+                      {selectedMatch.status === "finished"
+                        ? "Tamamlandı"
+                        : selectedMatch.status === "cancelled"
+                          ? "İptal edildi"
+                          : selectedMatch.schedule_confirmed &&
+                              selectedMatch.kickoff
+                            ? "Program onaylı"
+                            : "Saat bekleniyor"}
+                    </p>
+                  </div>
+
+                  <span
+                    className={`rounded-full px-3 py-1.5 text-[9px] font-bold ${
+                      selectedIsFinished
+                        ? "bg-emerald-50 text-emerald-700"
+                        : selectedIsCancelled
+                          ? "bg-red-50 text-red-600"
+                          : selectedMatch.schedule_confirmed &&
+                              selectedMatch.kickoff
+                            ? "bg-blue-50 text-blue-700"
+                            : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {selectedIsFinished
+                      ? "BİTTİ"
+                      : selectedIsCancelled
+                        ? "İPTAL"
+                        : selectedMatch.schedule_confirmed &&
+                            selectedMatch.kickoff
+                          ? "ONAYLI"
+                          : "BEKLİYOR"}
+                  </span>
+                </div>
+              </div>
+
+              {/* TAHMİN */}
+              {selectedPrediction && (
+                <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-5">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-blue-600">
+                    Senin Tahminin
+                  </p>
+
+                  <div className="mt-3 flex items-center justify-between gap-4">
+                    <p className="text-2xl font-extrabold text-[#0f2747]">
+                      {selectedPrediction.home_score}
+                      <span className="mx-2 text-slate-400">
+                        -
+                      </span>
+                      {selectedPrediction.away_score}
+                    </p>
+
+                    {selectedIsFinished && (
+                      <div className="text-right">
+                        <p
+                          className={`text-xl font-extrabold ${
+                            selectedPrediction.points > 0
+                              ? "text-emerald-600"
+                              : "text-slate-400"
+                          }`}
+                        >
+                          +{selectedPrediction.points}
+                        </p>
+
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                          Kazanılan puan
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAHMİN BUTONU */}
+              {selectedCanPredict && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.location.href = `/tahmin?match=${selectedMatch.id}`;
+                  }}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  🎯
+                  {selectedPrediction
+                    ? "Tahmini Gör / Değiştir"
+                    : "Bu Maçı Tahmin Et"}
+                  <span>→</span>
+                </button>
+              )}
+
+              {/* KAPAT */}
+              <button
+                type="button"
+                onClick={() => setSelectedMatch(null)}
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -13,6 +13,8 @@ type Match = {
   home_score: number | null;
   away_score: number | null;
   schedule_confirmed: boolean;
+  home_logo_url: string | null;
+  away_logo_url: string | null;
 };
 
 type Prediction = {
@@ -210,6 +212,36 @@ export default function HomePage() {
     }).format(new Date(date));
   };
 
+  const getTeamInitial = (team: string) => {
+    return team.trim().charAt(0).toUpperCase() || "⚽";
+  };
+
+  const TeamLogo = ({
+    url,
+    team,
+  }: {
+    url: string | null;
+    team: string;
+  }) => {
+    if (url) {
+      return (
+        <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-slate-100 bg-white p-2 shadow-sm">
+          <img
+            src={url}
+            alt={`${team} logosu`}
+            className="h-full w-full object-contain"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-2xl font-black text-slate-400">
+        {getTeamInitial(team)}
+      </div>
+    );
+  };
+
   const matchPoints = predictions.reduce(
     (sum, prediction) => sum + (prediction.points || 0),
     0
@@ -241,6 +273,7 @@ export default function HomePage() {
       <main className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
+
           <p className="mt-4 font-bold text-slate-600">
             Yükleniyor...
           </p>
@@ -262,6 +295,7 @@ export default function HomePage() {
               <h1 className="font-black text-slate-900">
                 Futbol Tahmin
               </h1>
+
               <p className="text-xs font-bold text-blue-600">
                 Tahmin Platformu
               </p>
@@ -333,6 +367,7 @@ export default function HomePage() {
               <p className="text-xs font-bold text-blue-200">
                 Toplam Puan
               </p>
+
               <p className="mt-2 text-3xl font-black">
                 {totalPoints}
               </p>
@@ -342,6 +377,7 @@ export default function HomePage() {
               <p className="text-xs font-bold text-blue-200">
                 Tahmin
               </p>
+
               <p className="mt-2 text-3xl font-black">
                 {predictions.length}
               </p>
@@ -351,6 +387,7 @@ export default function HomePage() {
               <p className="text-xs font-bold text-blue-200">
                 Tam İsabet
               </p>
+
               <p className="mt-2 text-3xl font-black">
                 {exactScores}
               </p>
@@ -360,6 +397,7 @@ export default function HomePage() {
               <p className="text-xs font-bold text-blue-200">
                 Bonus Puanı
               </p>
+
               <p className="mt-2 text-3xl font-black">
                 {bonusPoints}
               </p>
@@ -373,6 +411,7 @@ export default function HomePage() {
               <p className="text-xs font-black uppercase tracking-wider text-blue-600">
                 Maç Programı
               </p>
+
               <h2 className="mt-1 text-2xl font-black text-slate-900">
                 Yaklaşan Maçlar
               </h2>
@@ -386,6 +425,7 @@ export default function HomePage() {
           {upcomingMatches.length === 0 ? (
             <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
               <div className="text-5xl">⚽</div>
+
               <p className="mt-4 font-bold text-slate-500">
                 Şu anda yaklaşan maç bulunmuyor.
               </p>
@@ -428,10 +468,16 @@ export default function HomePage() {
 
                     <div className="p-5">
                       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                        <div className="text-right">
-                          <p className="font-black text-slate-900">
+                        <div className="flex min-w-0 flex-col items-center text-center">
+                          <TeamLogo
+                            url={match.home_logo_url}
+                            team={match.home_team}
+                          />
+
+                          <p className="mt-3 w-full break-words font-black text-slate-900">
                             {match.home_team}
                           </p>
+
                           <p className="mt-1 text-xs text-slate-400">
                             Ev Sahibi
                           </p>
@@ -441,10 +487,16 @@ export default function HomePage() {
                           VS
                         </div>
 
-                        <div>
-                          <p className="font-black text-slate-900">
+                        <div className="flex min-w-0 flex-col items-center text-center">
+                          <TeamLogo
+                            url={match.away_logo_url}
+                            team={match.away_team}
+                          />
+
+                          <p className="mt-3 w-full break-words font-black text-slate-900">
                             {match.away_team}
                           </p>
+
                           <p className="mt-1 text-xs text-slate-400">
                             Deplasman
                           </p>
@@ -498,18 +550,19 @@ export default function HomePage() {
                   key={match.id}
                   className="rounded-2xl bg-white p-5 shadow-sm"
                 >
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="font-black text-slate-900">
-                        {match.home_team}
-                      </p>
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+                    <div className="flex min-w-0 flex-col items-center text-center">
+                      <TeamLogo
+                        url={match.home_logo_url}
+                        team={match.home_team}
+                      />
 
-                      <p className="mt-1 text-sm font-bold text-slate-400">
-                        {match.away_team}
+                      <p className="mt-2 w-full break-words font-black text-slate-900">
+                        {match.home_team}
                       </p>
                     </div>
 
-                    <div className="text-right">
+                    <div className="text-center">
                       <p className="text-xl font-black">
                         {match.home_score} - {match.away_score}
                       </p>
@@ -519,6 +572,17 @@ export default function HomePage() {
                           +{prediction.points} puan
                         </p>
                       )}
+                    </div>
+
+                    <div className="flex min-w-0 flex-col items-center text-center">
+                      <TeamLogo
+                        url={match.away_logo_url}
+                        team={match.away_team}
+                      />
+
+                      <p className="mt-2 w-full break-words font-black text-slate-900">
+                        {match.away_team}
+                      </p>
                     </div>
                   </div>
                 </div>

@@ -13,6 +13,8 @@ type Match = {
   home_score: number | null;
   away_score: number | null;
   schedule_confirmed: boolean;
+  home_logo_url: string | null;
+  away_logo_url: string | null;
 };
 
 type BonusQuestion = {
@@ -33,9 +35,7 @@ export default function AdminPage() {
   const [checking, setChecking] = useState(true);
 
   const [matches, setMatches] = useState<Match[]>([]);
-  const [bonusQuestions, setBonusQuestions] = useState<BonusQuestion[]>(
-    []
-  );
+  const [bonusQuestions, setBonusQuestions] = useState<BonusQuestion[]>([]);
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,9 +46,12 @@ export default function AdminPage() {
   const [league, setLeague] = useState("");
   const [status, setStatus] = useState("scheduled");
   const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
-  const [editingMatchId, setEditingMatchId] = useState<number | null>(
-    null
-  );
+  const [editingMatchId, setEditingMatchId] = useState<number | null>(null);
+
+  const [homeLogoFile, setHomeLogoFile] = useState<File | null>(null);
+  const [awayLogoFile, setAwayLogoFile] = useState<File | null>(null);
+  const [homeLogoPreview, setHomeLogoPreview] = useState<string | null>(null);
+  const [awayLogoPreview, setAwayLogoPreview] = useState<string | null>(null);
 
   const [bonusMatchId, setBonusMatchId] = useState("");
   const [bonusQuestion, setBonusQuestion] = useState("");
@@ -61,9 +64,7 @@ export default function AdminPage() {
   const [optionD, setOptionD] = useState("");
   const [correctAnswer, setCorrectAnswer] = useState("");
   const [bonusPoints, setBonusPoints] = useState("5");
-  const [editingBonusId, setEditingBonusId] = useState<number | null>(
-    null
-  );
+  const [editingBonusId, setEditingBonusId] = useState<number | null>(null);
 
   const loadData = async () => {
     const matchesResult = await supabase
@@ -143,13 +144,9 @@ export default function AdminPage() {
     setMessage("Çıkış yapılıyor...");
 
     try {
-      const result = await supabase.auth.signOut({
+      await supabase.auth.signOut({
         scope: "local",
       });
-
-      if (result.error) {
-        console.error("Çıkış hatası:", result.error);
-      }
     } catch (error) {
       console.error("Çıkış hatası:", error);
     }
@@ -165,6 +162,11 @@ export default function AdminPage() {
     setStatus("scheduled");
     setScheduleConfirmed(false);
     setEditingMatchId(null);
+
+    setHomeLogoFile(null);
+    setAwayLogoFile(null);
+    setHomeLogoPreview(null);
+    setAwayLogoPreview(null);
   };
 
   const resetBonusForm = () => {
@@ -180,6 +182,42 @@ export default function AdminPage() {
     setEditingBonusId(null);
   };
 
+  const uploadLogo = async (
+    file: File,
+    teamName: string
+  ): Promise<string | null> => {
+    const extension =
+      file.name.split(".").pop()?.toLowerCase() || "png";
+
+    const safeTeamName = teamName
+      .toLowerCase()
+      .replace(/[^a-z0-9ğüşıöç]+/gi, "-")
+      .replace(/^-+|-+$/g, "");
+
+    const fileName = `${safeTeamName || "takim"}-${Date.now()}.${extension}`;
+
+    const filePath = `${fileName}`;
+
+    const uploadResult = await supabase.storage
+      .from("team-logos")
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: file.type || "image/png",
+      });
+
+    if (uploadResult.error) {
+      throw new Error(
+        "Logo yüklenemedi: " + uploadResult.error.message
+      );
+    }
+
+    const publicUrlResult = supabase.storage
+      .from("team-logos")
+      .getPublicUrl(filePath);
+
+    return publicUrlResult.data.publicUrl;
+  };
+
   const saveMatch = async () => {
     setMessage("");
 
@@ -193,40 +231,93 @@ export default function AdminPage() {
       return;
     }
 
-    setLoading(true);
-
-    const payload = {
-      home_team: homeTeam.trim(),
-      away_team: awayTeam.trim(),
-      kickoff: new Date(kickoff).toISOString(),
-      league: league.trim() || null,
-      status,
-      schedule_confirmed: scheduleConfirmed,
-    };
-
-    const result =
-      editingMatchId !== null
-        ? await supabase
-            .from("Matches")
-            .update(payload)
-            .eq("id", editingMatchId)
-        : await supabase.from("Matches").insert(payload);
-
-    setLoading(false);
-
-    if (result.error) {
-      setMessage("Hata: " + result.error.message);
+    if (homeLogoFile && !homeLogoFile.type.startsWith("image/")) {
+      setMessage("Ev sahibi logosu bir resim dosyası olmalıdır.");
       return;
     }
 
-    setMessage(
-      editingMatchId !== null
-        ? "Maç güncellendi."
-        : "Maç eklendi."
-    );
+    if (awayLogoFile && !awayLogoFile.type.startsWith("image/")) {
+      setMessage("Deplasman logosu bir resim dosyası olmalıdır.");
+      return;
+    }
 
-    resetMatchForm();
-    await loadData();
+    setLoading(true);
+
+    try {
+      let homeLogoUrl: string | null = null;
+      let awayLogoUrl: string | null = null;
+
+      if (homeLogoFile) {
+        homeLogoUrl = await uploadLogo(
+          homeLogoFile,
+          homeTeam
+        );
+      }
+
+      if (awayLogoFile) {
+        awayLogoUrl = await uploadLogo(
+          awayLogoFile,
+          awayTeam
+        );
+      }
+
+      const payload: {
+        home_team: string;
+        away_team: string;
+        kickoff: string;
+        league: string | null;
+        status: string;
+        schedule_confirmed: boolean;
+        home_logo_url?: string;
+        away_logo_url?: string;
+      } = {
+        home_team: homeTeam.trim(),
+        away_team: awayTeam.trim(),
+        kickoff: new Date(kickoff).toISOString(),
+        league: league.trim() || null,
+        status,
+        schedule_confirmed: scheduleConfirmed,
+      };
+
+      if (homeLogoUrl) {
+        payload.home_logo_url = homeLogoUrl;
+      }
+
+      if (awayLogoUrl) {
+        payload.away_logo_url = awayLogoUrl;
+      }
+
+      const result =
+        editingMatchId !== null
+          ? await supabase
+              .from("Matches")
+              .update(payload)
+              .eq("id", editingMatchId)
+          : await supabase.from("Matches").insert(payload);
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      setMessage(
+        editingMatchId !== null
+          ? "Maç ve logolar güncellendi."
+          : "Maç ve logolar eklendi."
+      );
+
+      resetMatchForm();
+      await loadData();
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Maç kaydedilemedi."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const editMatch = (match: Match) => {
@@ -236,6 +327,11 @@ export default function AdminPage() {
     setLeague(match.league || "");
     setStatus(match.status);
     setScheduleConfirmed(match.schedule_confirmed);
+
+    setHomeLogoFile(null);
+    setAwayLogoFile(null);
+    setHomeLogoPreview(match.home_logo_url || null);
+    setAwayLogoPreview(match.away_logo_url || null);
 
     const date = new Date(match.kickoff);
 
@@ -481,6 +577,30 @@ export default function AdminPage() {
       : "Bilinmeyen maç";
   };
 
+  const handleHomeLogoChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0] || null;
+
+    setHomeLogoFile(file);
+
+    if (file) {
+      setHomeLogoPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleAwayLogoChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0] || null;
+
+    setAwayLogoFile(file);
+
+    if (file) {
+      setAwayLogoPreview(URL.createObjectURL(file));
+    }
+  };
+
   if (checking) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-yellow-50">
@@ -526,7 +646,7 @@ export default function AdminPage() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <button
             type="button"
-            onClick={() => window.location.href = "/"}
+            onClick={() => (window.location.href = "/")}
             className="flex items-center gap-3"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-yellow-400 to-red-600 text-2xl text-white">
@@ -555,13 +675,12 @@ export default function AdminPage() {
 
             <button
               type="button"
-              onClick={() => window.location.href = "/"}
+              onClick={() => (window.location.href = "/")}
               className="rounded-xl bg-gradient-to-r from-yellow-400 to-red-600 px-4 py-3 text-sm font-black text-white"
             >
               🏠 Ana Sayfa
             </button>
 
-            {/* ÇIKIŞ BUTONU */}
             <button
               type="button"
               onClick={handleLogout}
@@ -589,7 +708,7 @@ export default function AdminPage() {
               </h2>
 
               <p className="mt-4 text-white/90">
-                Maçları, skorları ve bonus sorularını yönet.
+                Maçları, skorları, logoları ve bonus sorularını yönet.
               </p>
             </div>
 
@@ -703,6 +822,58 @@ export default function AdminPage() {
 
             <div>
               <label className="mb-2 block text-sm font-black">
+                Ev Sahibi Logosu
+              </label>
+
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                onChange={handleHomeLogoChange}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm"
+              />
+
+              {homeLogoPreview && (
+                <div className="mt-3 flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                  <img
+                    src={homeLogoPreview}
+                    alt="Ev sahibi logosu"
+                    className="h-14 w-14 object-contain"
+                  />
+                  <span className="text-xs font-bold text-slate-500">
+                    Logo hazır
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-black">
+                Deplasman Logosu
+              </label>
+
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                onChange={handleAwayLogoChange}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm"
+              />
+
+              {awayLogoPreview && (
+                <div className="mt-3 flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                  <img
+                    src={awayLogoPreview}
+                    alt="Deplasman logosu"
+                    className="h-14 w-14 object-contain"
+                  />
+                  <span className="text-xs font-bold text-slate-500">
+                    Logo hazır
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-black">
                 Durum
               </label>
 
@@ -739,9 +910,11 @@ export default function AdminPage() {
                 disabled={loading}
                 className="flex-1 rounded-xl bg-gradient-to-r from-yellow-400 to-red-600 px-5 py-3.5 font-black text-white disabled:opacity-60"
               >
-                {editingMatchId !== null
-                  ? "💾 Güncelle"
-                  : "➕ Maç Ekle"}
+                {loading
+                  ? "⏳ Kaydediliyor..."
+                  : editingMatchId !== null
+                    ? "💾 Güncelle"
+                    : "➕ Maç Ekle"}
               </button>
 
               {editingMatchId !== null && (
@@ -789,9 +962,23 @@ export default function AdminPage() {
                 </div>
 
                 <div className="mt-6 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                  <p className="text-right font-black">
-                    {match.home_team}
-                  </p>
+                  <div className="flex flex-col items-end">
+                    {match.home_logo_url ? (
+                      <img
+                        src={match.home_logo_url}
+                        alt={match.home_team}
+                        className="mb-2 h-14 w-14 object-contain"
+                      />
+                    ) : (
+                      <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-400">
+                        {match.home_team.charAt(0)}
+                      </div>
+                    )}
+
+                    <p className="text-right font-black">
+                      {match.home_team}
+                    </p>
+                  </div>
 
                   <div className="rounded-2xl bg-red-50 px-4 py-3 text-center font-black text-red-700">
                     {match.home_score !== null &&
@@ -800,9 +987,23 @@ export default function AdminPage() {
                       : "VS"}
                   </div>
 
-                  <p className="font-black">
-                    {match.away_team}
-                  </p>
+                  <div className="flex flex-col items-start">
+                    {match.away_logo_url ? (
+                      <img
+                        src={match.away_logo_url}
+                        alt={match.away_team}
+                        className="mb-2 h-14 w-14 object-contain"
+                      />
+                    ) : (
+                      <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-400">
+                        {match.away_team.charAt(0)}
+                      </div>
+                    )}
+
+                    <p className="font-black">
+                      {match.away_team}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="mt-5 grid grid-cols-2 gap-3">

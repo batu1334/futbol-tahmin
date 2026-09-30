@@ -38,6 +38,8 @@ type Profile = {
   is_admin: boolean;
 };
 
+type ViewMode = "cards" | "list";
+
 export default function HomePage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -46,6 +48,8 @@ export default function HomePage() {
   const [matchFilter, setMatchFilter] = useState<
     "all" | "upcoming" | "finished"
   >("all");
+
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
   const [profile, setProfile] = useState<Profile>({
     display_name: "Oyuncu",
@@ -100,6 +104,14 @@ export default function HomePage() {
 
   useEffect(() => {
     let mounted = true;
+
+    const savedView = window.localStorage.getItem(
+      "futbol-tahmin-view-mode"
+    );
+
+    if (savedView === "cards" || savedView === "list") {
+      setViewMode(savedView);
+    }
 
     const initialize = async () => {
       const {
@@ -200,6 +212,14 @@ export default function HomePage() {
     window.location.href = path;
   };
 
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    window.localStorage.setItem(
+      "futbol-tahmin-view-mode",
+      mode
+    );
+  };
+
   const getPrediction = (matchId: number) => {
     return predictions.find(
       (prediction) => prediction.match_id === matchId
@@ -272,6 +292,57 @@ export default function HomePage() {
     return "Saat yok";
   };
 
+  const formatListTime = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (date) {
+      const parsed = new Date(date);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    if (matchDate) {
+      return "—";
+    }
+
+    return "—";
+  };
+
+  const formatListDate = (
+    date: string | null,
+    matchDate?: string | null
+  ) => {
+    if (date) {
+      const parsed = new Date(date);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          day: "2-digit",
+          month: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    if (matchDate) {
+      const parsed = new Date(`${matchDate}T00:00:00`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          day: "2-digit",
+          month: "2-digit",
+        }).format(parsed);
+      }
+    }
+
+    return "";
+  };
+
   const getTeamInitial = (team: string) => {
     return team.trim().charAt(0).toUpperCase() || "⚽";
   };
@@ -279,13 +350,21 @@ export default function HomePage() {
   const TeamLogo = ({
     url,
     team,
+    small = false,
   }: {
     url: string | null;
     team: string;
+    small?: boolean;
   }) => {
     if (url) {
       return (
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:h-20 sm:w-20">
+        <div
+          className={`flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm ${
+            small
+              ? "h-8 w-8 p-1"
+              : "h-16 w-16 p-2 sm:h-20 sm:w-20"
+          }`}
+        >
           <img
             src={url}
             alt={`${team} logosu`}
@@ -296,7 +375,13 @@ export default function HomePage() {
     }
 
     return (
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-xl font-bold text-slate-400 shadow-sm sm:h-20 sm:w-20">
+      <div
+        className={`flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 font-bold text-slate-400 shadow-sm ${
+          small
+            ? "h-8 w-8 text-xs"
+            : "h-16 w-16 text-xl sm:h-20 sm:w-20"
+        }`}
+      >
         {getTeamInitial(team)}
       </div>
     );
@@ -338,6 +423,23 @@ export default function HomePage() {
   const confirmedUpcoming = upcomingMatches.filter(
     (match) => match.schedule_confirmed && match.kickoff
   ).length;
+
+  const groupedMatches = filteredMatches.reduce(
+    (groups, match) => {
+      const league = match.league || "Diğer Maçlar";
+
+      if (!groups[league]) {
+        groups[league] = [];
+      }
+
+      groups[league].push(match);
+
+      return groups;
+    },
+    {} as Record<string, Match[]>
+  );
+
+  const leagueGroups = Object.entries(groupedMatches);
 
   if (loading) {
     return (
@@ -397,8 +499,17 @@ export default function HomePage() {
         }
 
         .hero-shadow {
-          box-shadow:
-            0 15px 45px rgba(15, 39, 71, 0.18);
+          box-shadow: 0 15px 45px rgba(15, 39, 71, 0.18);
+        }
+
+        .list-row {
+          transition:
+            background-color 0.15s ease,
+            transform 0.15s ease;
+        }
+
+        .list-row:hover {
+          background-color: #f8fafc;
         }
       `}</style>
 
@@ -652,7 +763,6 @@ export default function HomePage() {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Toplam Puan
               </p>
-
               <span className="text-lg">⚡</span>
             </div>
 
@@ -670,7 +780,6 @@ export default function HomePage() {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Tahmin
               </p>
-
               <span className="text-lg">🎯</span>
             </div>
 
@@ -688,7 +797,6 @@ export default function HomePage() {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Tam İsabet
               </p>
-
               <span className="text-lg">🎯</span>
             </div>
 
@@ -706,7 +814,6 @@ export default function HomePage() {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Bonus
               </p>
-
               <span className="text-lg">🔥</span>
             </div>
 
@@ -792,6 +899,43 @@ export default function HomePage() {
             </button>
           </div>
 
+          {/* GÖRÜNÜM SEÇİCİ */}
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+            <div className="px-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Görünüm
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => changeViewMode("cards")}
+                className={`flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                  viewMode === "cards"
+                    ? "bg-[#0f2747] text-white shadow-sm"
+                    : "text-slate-500 hover:bg-white"
+                }`}
+              >
+                <span>▦</span>
+                Kart
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changeViewMode("list")}
+                className={`flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
+                  viewMode === "list"
+                    ? "bg-[#0f2747] text-white shadow-sm"
+                    : "text-slate-500 hover:bg-white"
+                }`}
+              >
+                <span>☰</span>
+                Liste
+              </button>
+            </div>
+          </div>
+
           {filteredMatches.length === 0 ? (
             <div className="card-shadow mt-4 rounded-2xl border border-slate-200 bg-white p-10 text-center">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">
@@ -802,7 +946,10 @@ export default function HomePage() {
                 Bu kategoride maç bulunmuyor.
               </p>
             </div>
-          ) : (
+          ) : viewMode === "cards" ? (
+            /* =========================================================
+               KART GÖRÜNÜMÜ
+            ========================================================= */
             <div className="mt-4 space-y-4">
               {filteredMatches.map((match) => {
                 const prediction = getPrediction(match.id);
@@ -1010,6 +1157,322 @@ export default function HomePage() {
                   </article>
                 );
               })}
+            </div>
+          ) : (
+            /* =========================================================
+               LİSTE GÖRÜNÜMÜ
+            ========================================================= */
+            <div className="mt-4 space-y-4">
+              {leagueGroups.map(([league, leagueMatches]) => (
+                <section
+                  key={league}
+                  className="card-shadow overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                >
+                  {/* LİG BAŞLIĞI */}
+                  <div className="flex items-center justify-between border-b border-slate-200 bg-[#0f2747] px-4 py-3.5 sm:px-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm">
+                        ⚽
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-extrabold uppercase tracking-wide text-white sm:text-sm">
+                          {league}
+                        </p>
+
+                        <p className="mt-0.5 text-[9px] font-medium text-slate-300">
+                          {leagueMatches.length} maç
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="hidden rounded-full bg-white/10 px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-300 sm:block">
+                      Maçlar
+                    </span>
+                  </div>
+
+                  {/* LİSTE */}
+                  <div className="divide-y divide-slate-100">
+                    {leagueMatches.map((match) => {
+                      const prediction = getPrediction(match.id);
+                      const isFinished =
+                        match.status === "finished";
+                      const isCancelled =
+                        match.status === "cancelled";
+
+                      const canPredict =
+                        !isFinished &&
+                        !isCancelled &&
+                        match.schedule_confirmed &&
+                        Boolean(match.kickoff);
+
+                      return (
+                        <div
+                          key={match.id}
+                          className="list-row px-3 py-3.5 sm:px-5 sm:py-4"
+                        >
+                          {/* MASAÜSTÜ / GENİŞ */}
+                          <div className="hidden items-center gap-4 md:grid md:grid-cols-[80px_minmax(0,1fr)_90px_minmax(0,1fr)_auto]">
+                            {/* TARİH / SAAT */}
+                            <div className="text-center">
+                              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                                Tarih
+                              </p>
+
+                              <p className="mt-1 text-xs font-bold text-[#0f2747]">
+                                {formatListDate(
+                                  match.kickoff,
+                                  match.match_date
+                                )}
+                              </p>
+
+                              <p className="mt-0.5 text-sm font-extrabold text-blue-600">
+                                {formatListTime(
+                                  match.kickoff,
+                                  match.match_date
+                                )}
+                              </p>
+                            </div>
+
+                            {/* EV */}
+                            <div className="flex min-w-0 items-center justify-end gap-3">
+                              <p className="truncate text-right text-sm font-bold text-[#0f2747]">
+                                {match.home_team}
+                              </p>
+
+                              <TeamLogo
+                                url={match.home_logo_url}
+                                team={match.home_team}
+                                small
+                              />
+                            </div>
+
+                            {/* SKOR */}
+                            <div className="flex flex-col items-center">
+                              {isFinished ? (
+                                <div className="rounded-lg bg-[#0f2747] px-3 py-2">
+                                  <p className="text-sm font-extrabold text-white">
+                                    {match.home_score ?? "-"}
+                                    <span className="mx-1 text-slate-400">
+                                      -
+                                    </span>
+                                    {match.away_score ?? "-"}
+                                  </p>
+                                </div>
+                              ) : isCancelled ? (
+                                <span className="rounded-lg bg-red-50 px-2.5 py-2 text-[9px] font-bold text-red-600">
+                                  İPTAL
+                                </span>
+                              ) : (
+                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-[9px] font-extrabold text-slate-500">
+                                  VS
+                                </div>
+                              )}
+
+                              {prediction && (
+                                <p className="mt-1 text-[9px] font-bold text-blue-600">
+                                  Tahmin {prediction.home_score}-
+                                  {prediction.away_score}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* DEPLASMAN */}
+                            <div className="flex min-w-0 items-center justify-start gap-3">
+                              <TeamLogo
+                                url={match.away_logo_url}
+                                team={match.away_team}
+                                small
+                              />
+
+                              <p className="truncate text-sm font-bold text-[#0f2747]">
+                                {match.away_team}
+                              </p>
+                            </div>
+
+                            {/* AKSİYON */}
+                            <div className="flex justify-end">
+                              {isFinished ? (
+                                prediction ? (
+                                  <div className="text-right">
+                                    <p
+                                      className={`text-xs font-extrabold ${
+                                        prediction.points > 0
+                                          ? "text-emerald-600"
+                                          : "text-slate-400"
+                                      }`}
+                                    >
+                                      +{prediction.points}
+                                    </p>
+
+                                    <p className="text-[8px] font-semibold uppercase text-slate-400">
+                                      Puan
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-400">
+                                    —
+                                  </span>
+                                )
+                              ) : canPredict ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    (window.location.href =
+                                      `/tahmin?match=${match.id}`)
+                                  }
+                                  className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-blue-700"
+                                >
+                                  {prediction
+                                    ? "Değiştir"
+                                    : "Tahmin Et"}
+                                </button>
+                              ) : (
+                                <span className="rounded-lg bg-amber-50 px-3 py-2 text-[9px] font-bold text-amber-600">
+                                  Bekliyor
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* MOBİL */}
+                          <div className="md:hidden">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-[58px] text-center">
+                                <p className="text-[9px] font-bold text-slate-400">
+                                  {formatListDate(
+                                    match.kickoff,
+                                    match.match_date
+                                  )}
+                                </p>
+
+                                <p className="mt-0.5 text-sm font-extrabold text-blue-600">
+                                  {formatListTime(
+                                    match.kickoff,
+                                    match.match_date
+                                  )}
+                                </p>
+                              </div>
+
+                              <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+                                <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+                                  <p className="truncate text-right text-xs font-bold text-[#0f2747]">
+                                    {match.home_team}
+                                  </p>
+
+                                  <TeamLogo
+                                    url={match.home_logo_url}
+                                    team={match.home_team}
+                                    small
+                                  />
+                                </div>
+
+                                <div className="flex w-12 shrink-0 flex-col items-center">
+                                  {isFinished ? (
+                                    <span className="rounded-lg bg-[#0f2747] px-2.5 py-1.5 text-xs font-extrabold text-white">
+                                      {match.home_score ?? "-"}-
+                                      {match.away_score ?? "-"}
+                                    </span>
+                                  ) : isCancelled ? (
+                                    <span className="rounded-lg bg-red-50 px-2 py-1.5 text-[8px] font-bold text-red-600">
+                                      İPTAL
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-lg bg-slate-100 px-2 py-1.5 text-[9px] font-extrabold text-slate-500">
+                                      VS
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex min-w-0 flex-1 items-center justify-start gap-2">
+                                  <TeamLogo
+                                    url={match.away_logo_url}
+                                    team={match.away_team}
+                                    small
+                                  />
+
+                                  <p className="truncate text-xs font-bold text-[#0f2747]">
+                                    {match.away_team}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                              <div>
+                                {isFinished && prediction ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded-full bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-700">
+                                      Tahmin {prediction.home_score}-
+                                      {prediction.away_score}
+                                    </span>
+
+                                    <span
+                                      className={`text-[10px] font-extrabold ${
+                                        prediction.points > 0
+                                          ? "text-emerald-600"
+                                          : "text-slate-400"
+                                      }`}
+                                    >
+                                      +{prediction.points} puan
+                                    </span>
+                                  </div>
+                                ) : prediction ? (
+                                  <span className="rounded-full bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-700">
+                                    Tahmin {prediction.home_score}-
+                                    {prediction.away_score}
+                                  </span>
+                                ) : isFinished ? (
+                                  <span className="text-[9px] font-semibold text-slate-400">
+                                    Tahmin yapılmadı
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={`text-[9px] font-semibold ${
+                                      match.schedule_confirmed &&
+                                      match.kickoff
+                                        ? "text-emerald-600"
+                                        : "text-amber-600"
+                                    }`}
+                                  >
+                                    {match.schedule_confirmed &&
+                                    match.kickoff
+                                      ? "Tahmine açık"
+                                      : "Saat bekleniyor"}
+                                  </span>
+                                )}
+                              </div>
+
+                              {!isFinished &&
+                                !isCancelled &&
+                                canPredict && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      (window.location.href =
+                                        `/tahmin?match=${match.id}`)
+                                    }
+                                    className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-bold text-white shadow-sm transition hover:bg-blue-700"
+                                  >
+                                    {prediction
+                                      ? "Değiştir →"
+                                      : "Tahmin Et →"}
+                                  </button>
+                                )}
+
+                              {isCancelled && (
+                                <span className="rounded-lg bg-red-50 px-3 py-2 text-[9px] font-bold text-red-600">
+                                  İptal
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </section>

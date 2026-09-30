@@ -13,6 +13,8 @@ type Match = {
   home_score: number | null;
   away_score: number | null;
   schedule_confirmed: boolean | null;
+  home_logo_url: string | null;
+  away_logo_url: string | null;
 };
 
 type Prediction = {
@@ -116,7 +118,7 @@ export default function Home() {
     const matchResult = await supabase
       .from("Matches")
       .select(
-        "id, home_team, away_team, kickoff, league, status, home_score, away_score, schedule_confirmed"
+        "id, home_team, away_team, kickoff, league, status, home_score, away_score, schedule_confirmed, home_logo_url, away_logo_url"
       )
       .order("kickoff", { ascending: true });
 
@@ -125,6 +127,11 @@ export default function Home() {
     if (!matchResult.error) {
       loadedMatches = matchResult.data || [];
       setMatches(loadedMatches);
+    } else {
+      console.log(
+        "Maç yükleme hatası:",
+        matchResult.error
+      );
     }
 
     const predictionResult = await supabase
@@ -656,6 +663,51 @@ export default function Home() {
     window.location.href = "/login";
   }
 
+  function getTeamInitial(team: string) {
+    return (
+      team.trim().charAt(0).toUpperCase() ||
+      "⚽"
+    );
+  }
+
+  function TeamLogo({
+    url,
+    team,
+    size = "h-20 w-20",
+  }: {
+    url: string | null;
+    team: string;
+    size?: string;
+  }) {
+    const [imageError, setImageError] =
+      useState(false);
+
+    if (url && !imageError) {
+      return (
+        <div
+          className={`${size} flex items-center justify-center rounded-2xl border border-slate-700 bg-white p-2 shadow-sm`}
+        >
+          <img
+            src={url}
+            alt={`${team} logosu`}
+            className="h-full w-full object-contain"
+            onError={() =>
+              setImageError(true)
+            }
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`${size} flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-800 text-3xl font-black text-slate-400`}
+      >
+        {getTeamInitial(team)}
+      </div>
+    );
+  }
+
   const selectedMatch =
     getSelectedMatch();
 
@@ -724,27 +776,47 @@ export default function Home() {
             </p>
 
             <div className="mt-6 flex items-center justify-between gap-4">
-              <div className="flex-1 text-center">
-                <div className="text-4xl">
-                  🏠
-                </div>
+              <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                <TeamLogo
+                  url={
+                    selectedMatch.home_logo_url
+                  }
+                  team={
+                    selectedMatch.home_team
+                  }
+                  size="h-24 w-24"
+                />
 
-                <p className="mt-3 font-bold">
+                <p className="mt-3 break-words font-bold">
                   {selectedMatch.home_team}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Ev Sahibi
                 </p>
               </div>
 
-              <div className="text-xl font-bold text-slate-500">
+              <div className="shrink-0 text-xl font-bold text-slate-500">
                 VS
               </div>
 
-              <div className="flex-1 text-center">
-                <div className="text-4xl">
-                  🚌
-                </div>
+              <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                <TeamLogo
+                  url={
+                    selectedMatch.away_logo_url
+                  }
+                  team={
+                    selectedMatch.away_team
+                  }
+                  size="h-24 w-24"
+                />
 
-                <p className="mt-3 font-bold">
+                <p className="mt-3 break-words font-bold">
                   {selectedMatch.away_team}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Deplasman
                 </p>
               </div>
             </div>
@@ -1358,26 +1430,28 @@ export default function Home() {
                   </div>
 
                   <div className="mt-5 flex items-center justify-between gap-4">
-                    <div className="flex-1 text-center">
-                      <div className="text-3xl">
-                        🏠
-                      </div>
+                    <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                      <TeamLogo
+                        url={match.home_logo_url}
+                        team={match.home_team}
+                      />
 
-                      <p className="mt-2 font-semibold">
+                      <p className="mt-3 break-words font-semibold">
                         {match.home_team}
                       </p>
                     </div>
 
-                    <div className="font-bold text-slate-500">
+                    <div className="shrink-0 font-bold text-slate-500">
                       VS
                     </div>
 
-                    <div className="flex-1 text-center">
-                      <div className="text-3xl">
-                        🚌
-                      </div>
+                    <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+                      <TeamLogo
+                        url={match.away_logo_url}
+                        team={match.away_team}
+                      />
 
-                      <p className="mt-2 font-semibold">
+                      <p className="mt-3 break-words font-semibold">
                         {match.away_team}
                       </p>
                     </div>

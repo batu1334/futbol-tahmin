@@ -6,6 +6,7 @@ import { supabase } from "../../lib/supabase";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("");
 
   const [isRegister, setIsRegister] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -60,9 +61,25 @@ export default function LoginPage() {
     setMessage("");
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanNickname = nickname.trim();
 
     if (!cleanEmail || !password) {
       setMessage("E-posta ve şifre zorunludur.");
+      return;
+    }
+
+    if (isRegister && !cleanNickname) {
+      setMessage("Lakap zorunludur. Lütfen bir lakap yaz.");
+      return;
+    }
+
+    if (isRegister && cleanNickname.length < 2) {
+      setMessage("Lakap en az 2 karakter olmalıdır.");
+      return;
+    }
+
+    if (cleanNickname.length > 30) {
+      setMessage("Lakap en fazla 30 karakter olabilir.");
       return;
     }
 
@@ -77,6 +94,11 @@ export default function LoginPage() {
       const result = await supabase.auth.signUp({
         email: cleanEmail,
         password,
+        options: {
+          data: {
+            display_name: cleanNickname,
+          },
+        },
       });
 
       if (result.error) {
@@ -117,6 +139,15 @@ export default function LoginPage() {
     window.location.replace("/");
   };
 
+  const switchMode = (register: boolean) => {
+    setIsRegister(register);
+    setMessage("");
+
+    if (!register) {
+      setNickname("");
+    }
+  };
+
   if (checking) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 via-white to-slate-50">
@@ -154,10 +185,7 @@ export default function LoginPage() {
           <div className="mb-6 grid grid-cols-2 rounded-2xl bg-slate-100 p-1">
             <button
               type="button"
-              onClick={() => {
-                setIsRegister(false);
-                setMessage("");
-              }}
+              onClick={() => switchMode(false)}
               className={`rounded-xl px-4 py-3 text-sm font-black transition ${
                 !isRegister
                   ? "bg-white text-blue-700 shadow-sm"
@@ -169,10 +197,7 @@ export default function LoginPage() {
 
             <button
               type="button"
-              onClick={() => {
-                setIsRegister(true);
-                setMessage("");
-              }}
+              onClick={() => switchMode(true)}
               className={`rounded-xl px-4 py-3 text-sm font-black transition ${
                 isRegister
                   ? "bg-white text-blue-700 shadow-sm"
@@ -187,6 +212,34 @@ export default function LoginPage() {
             onSubmit={handleSubmit}
             className="space-y-5"
           >
+            {isRegister && (
+              <div>
+                <label className="mb-2 block text-sm font-black text-slate-700">
+                  Lakap
+                  <span className="ml-1 text-red-500">
+                    *
+                  </span>
+                </label>
+
+                <input
+                  type="text"
+                  value={nickname}
+                  onChange={(event) =>
+                    setNickname(event.target.value)
+                  }
+                  placeholder="Örn: KralBatuhan"
+                  maxLength={30}
+                  autoComplete="nickname"
+                  required
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 font-semibold outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                />
+
+                <p className="mt-2 text-xs font-semibold text-slate-400">
+                  2-30 karakter arasında olmalıdır.
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="mb-2 block text-sm font-black text-slate-700">
                 E-posta
@@ -200,6 +253,7 @@ export default function LoginPage() {
                 }
                 placeholder="ornek@mail.com"
                 autoComplete="email"
+                required
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 font-semibold outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               />
             </div>
@@ -222,6 +276,7 @@ export default function LoginPage() {
                       ? "new-password"
                       : "current-password"
                   }
+                  required
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 pr-20 font-semibold outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                 />
 
@@ -258,7 +313,9 @@ export default function LoginPage() {
 
           <button
             type="button"
-            onClick={() => window.location.href = "/"}
+            onClick={() =>
+              (window.location.href = "/")
+            }
             className="mt-5 w-full rounded-xl border border-slate-200 bg-white px-5 py-3 font-black text-slate-600 transition hover:bg-slate-50"
           >
             ← Ana Sayfaya Dön

@@ -7,8 +7,10 @@ type Match = {
   id: number;
   home_team: string;
   away_team: string;
-  kickoff: string;
+  kickoff: string | null;
+  match_date: string;
   league: string | null;
+  broadcast_channel: string | null;
   status: string;
   home_score: number | null;
   away_score: number | null;
@@ -42,8 +44,10 @@ export default function AdminPage() {
 
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
-  const [kickoff, setKickoff] = useState("");
+  const [matchDate, setMatchDate] = useState("");
+  const [kickoffTime, setKickoffTime] = useState("");
   const [league, setLeague] = useState("");
+  const [broadcastChannel, setBroadcastChannel] = useState("");
   const [status, setStatus] = useState("scheduled");
   const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
   const [editingMatchId, setEditingMatchId] = useState<number | null>(null);
@@ -70,7 +74,8 @@ export default function AdminPage() {
     const matchesResult = await supabase
       .from("Matches")
       .select("*")
-      .order("kickoff", { ascending: true });
+      .order("match_date", { ascending: true })
+      .order("kickoff", { ascending: true, nullsFirst: false });
 
     if (!matchesResult.error) {
       setMatches(matchesResult.data || []);
@@ -157,8 +162,10 @@ export default function AdminPage() {
   const resetMatchForm = () => {
     setHomeTeam("");
     setAwayTeam("");
-    setKickoff("");
+    setMatchDate("");
+    setKickoffTime("");
     setLeague("");
+    setBroadcastChannel("");
     setStatus("scheduled");
     setScheduleConfirmed(false);
     setEditingMatchId(null);
@@ -196,11 +203,9 @@ export default function AdminPage() {
 
     const fileName = `${safeTeamName || "takim"}-${Date.now()}.${extension}`;
 
-    const filePath = `${fileName}`;
-
     const uploadResult = await supabase.storage
       .from("team-logos")
-      .upload(filePath, file, {
+      .upload(fileName, file, {
         upsert: true,
         contentType: file.type || "image/png",
       });
@@ -213,7 +218,7 @@ export default function AdminPage() {
 
     const publicUrlResult = supabase.storage
       .from("team-logos")
-      .getPublicUrl(filePath);
+      .getPublicUrl(fileName);
 
     return publicUrlResult.data.publicUrl;
   };
@@ -226,9 +231,20 @@ export default function AdminPage() {
       return;
     }
 
-    if (!kickoff) {
-      setMessage("Tarih ve saat zorunludur.");
+    if (!matchDate) {
+      setMessage("Maç tarihi zorunludur.");
       return;
+    }
+
+    if (scheduleConfirmed && !kickoffTime) {
+      setMessage(
+        "Programı onaylamak için önce maç saatini girmelisin."
+      );
+      return;
+    }
+
+    if (status !== "finished" && !kickoffTime) {
+      setScheduleConfirmed(false);
     }
 
     if (homeLogoFile && !homeLogoFile.type.startsWith("image/")) {
@@ -261,11 +277,23 @@ export default function AdminPage() {
         );
       }
 
+      let kickoffIso: string | null = null;
+
+      if (kickoffTime) {
+        const localDateTime = `${matchDate}T${kickoffTime}:00`;
+        kickoffIso = new Date(localDateTime).toISOString();
+      }
+
+      const confirmed =
+        Boolean(kickoffTime) && scheduleConfirmed;
+
       const payload: {
         home_team: string;
         away_team: string;
-        kickoff: string;
+        match_date: string;
+        kickoff: string | null;
         league: string | null;
+        broadcast_channel: string | null;
         status: string;
         schedule_confirmed: boolean;
         home_logo_url?: string;
@@ -273,10 +301,13 @@ export default function AdminPage() {
       } = {
         home_team: homeTeam.trim(),
         away_team: awayTeam.trim(),
-        kickoff: new Date(kickoff).toISOString(),
+        match_date: matchDate,
+        kickoff: kickoffIso,
         league: league.trim() || null,
+        broadcast_channel:
+          broadcastChannel.trim() || null,
         status,
-        schedule_confirmed: scheduleConfirmed,
+        schedule_confirmed: confirmed,
       };
 
       if (homeLogoUrl) {
@@ -293,7 +324,9 @@ export default function AdminPage() {
               .from("Matches")
               .update(payload)
               .eq("id", editingMatchId)
-          : await supabase.from("Matches").insert(payload);
+          : await supabase
+              .from("Matches")
+              .insert(payload);
 
       if (result.error) {
         throw new Error(result.error.message);
@@ -301,8 +334,8 @@ export default function AdminPage() {
 
       setMessage(
         editingMatchId !== null
-          ? "Maç ve logolar güncellendi."
-          : "Maç ve logolar eklendi."
+          ? "Maç bilgileri güncellendi."
+          : "Maç eklendi."
       );
 
       resetMatchForm();
@@ -324,7 +357,9 @@ export default function AdminPage() {
     setEditingMatchId(match.id);
     setHomeTeam(match.home_team);
     setAwayTeam(match.away_team);
+    setMatchDate(match.match_date || "");
     setLeague(match.league || "");
+    setBroadcastChannel(match.broadcast_channel || "");
     setStatus(match.status);
     setScheduleConfirmed(match.schedule_confirmed);
 
@@ -333,17 +368,16 @@ export default function AdminPage() {
     setHomeLogoPreview(match.home_logo_url || null);
     setAwayLogoPreview(match.away_logo_url || null);
 
-    const date = new Date(match.kickoff);
+    if (match.kickoff) {
+      const date = new Date(match.kickoff);
 
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
+      const hours = String(date.getHours()).padStart(2, "0");
+      const minutes = String(date.getMinutes()).padStart(2, "0");
 
-    setKickoff(
-      `${year}-${month}-${day}T${hours}:${minutes}`
-    );
+      setKickoffTime(`${hours}:${minutes}`);
+    } else {
+      setKickoffTime("");
+    }
 
     window.scrollTo({
       top: 0,
@@ -444,16 +478,6 @@ export default function AdminPage() {
         setMessage("A, B, C ve D seçeneklerini doldur.");
         return;
       }
-
-      const answer = correctAnswer.trim().toUpperCase();
-
-      if (!["A", "B", "C", "D"].includes(answer)) {
-        setMessage("Doğru cevap A, B, C veya D olmalıdır.");
-        return;
-      }
-    } else if (!correctAnswer.trim()) {
-      setMessage("Doğru cevap boş bırakılamaz.");
-      return;
     }
 
     setLoading(true);
@@ -478,10 +502,6 @@ export default function AdminPage() {
         bonusType === "multiple_choice"
           ? optionD.trim()
           : null,
-      correct_answer:
-        bonusType === "multiple_choice"
-          ? correctAnswer.trim().toUpperCase()
-          : correctAnswer.trim(),
       points,
     };
 
@@ -493,7 +513,10 @@ export default function AdminPage() {
             .eq("id", editingBonusId)
         : await supabase
             .from("BonusQuestions")
-            .insert(payload);
+            .insert({
+              ...payload,
+              correct_answer: null,
+            });
 
     setLoading(false);
 
@@ -508,10 +531,69 @@ export default function AdminPage() {
     setMessage(
       editingBonusId !== null
         ? "Bonus sorusu güncellendi."
-        : "Bonus sorusu eklendi."
+        : "Bonus sorusu eklendi. Doğru cevap maçtan sonra belirlenecek."
     );
 
     resetBonusForm();
+    await loadData();
+  };
+
+  const saveCorrectAnswer = async (
+    bonus: BonusQuestion,
+    answer: string
+  ) => {
+    const cleanAnswer =
+      bonus.question_type === "multiple_choice"
+        ? answer.trim().toUpperCase()
+        : answer.trim();
+
+    if (!cleanAnswer) {
+      setMessage("Doğru cevap boş bırakılamaz.");
+      return;
+    }
+
+    if (
+      bonus.question_type === "multiple_choice" &&
+      !["A", "B", "C", "D"].includes(cleanAnswer)
+    ) {
+      setMessage("Doğru cevap A, B, C veya D olmalıdır.");
+      return;
+    }
+
+    const match = matches.find(
+      (item) => item.id === bonus.match_id
+    );
+
+    if (!match || match.status !== "finished") {
+      setMessage(
+        "Doğru cevap yalnızca maç bittikten sonra girilebilir."
+      );
+      return;
+    }
+
+    setLoading(true);
+
+    const result = await supabase
+      .from("BonusQuestions")
+      .update({
+        correct_answer: cleanAnswer,
+      })
+      .eq("id", bonus.id);
+
+    setLoading(false);
+
+    if (result.error) {
+      setMessage(
+        "Doğru cevap kaydedilemedi: " +
+          result.error.message
+      );
+      return;
+    }
+
+    setMessage(
+      "Doğru cevap kaydedildi ve bonus puanları hesaplandı."
+    );
+
     await loadData();
   };
 
@@ -524,7 +606,7 @@ export default function AdminPage() {
     setOptionB(bonus.option_b || "");
     setOptionC(bonus.option_c || "");
     setOptionD(bonus.option_d || "");
-    setCorrectAnswer(bonus.correct_answer || "");
+    setCorrectAnswer("");
     setBonusPoints(String(bonus.points));
 
     window.scrollTo({
@@ -560,14 +642,30 @@ export default function AdminPage() {
     await loadData();
   };
 
-  const formatDate = (value: string) =>
-    new Intl.DateTimeFormat("tr-TR", {
+  const formatMatchDate = (match: Match) => {
+    if (!match.match_date) {
+      return "Tarih belirtilmemiş";
+    }
+
+    const date = new Date(`${match.match_date}T00:00:00`);
+
+    const dateText = new Intl.DateTimeFormat("tr-TR", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+    }).format(date);
+
+    if (!match.kickoff) {
+      return `${dateText} • Saat henüz belli değil`;
+    }
+
+    const timeText = new Intl.DateTimeFormat("tr-TR", {
       hour: "2-digit",
       minute: "2-digit",
-    }).format(new Date(value));
+    }).format(new Date(match.kickoff));
+
+    return `${dateText} • ${timeText}`;
+  };
 
   const getMatchName = (matchId: number) => {
     const match = matches.find((item) => item.id === matchId);
@@ -606,6 +704,7 @@ export default function AdminPage() {
       <main className="flex min-h-screen items-center justify-center bg-yellow-50">
         <div className="text-center">
           <div className="mx-auto h-14 w-14 animate-spin rounded-full border-4 border-yellow-200 border-t-red-600" />
+
           <p className="mt-5 font-black text-slate-700">
             Yönetici paneli açılıyor...
           </p>
@@ -708,7 +807,7 @@ export default function AdminPage() {
               </h2>
 
               <p className="mt-4 text-white/90">
-                Maçları, skorları, logoları ve bonus sorularını yönet.
+                Maçları, skorları, logoları, yayın kanallarını ve bonus sorularını yönet.
               </p>
             </div>
 
@@ -796,15 +895,40 @@ export default function AdminPage() {
 
             <div>
               <label className="mb-2 block text-sm font-black">
-                Tarih / Saat
+                Maç Tarihi
               </label>
 
               <input
-                type="datetime-local"
-                value={kickoff}
-                onChange={(e) => setKickoff(e.target.value)}
+                type="date"
+                value={matchDate}
+                onChange={(e) => setMatchDate(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-4 py-3.5 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-100"
               />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-black">
+                Maç Saati
+              </label>
+
+              <input
+                type="time"
+                value={kickoffTime}
+                onChange={(e) => {
+                  setKickoffTime(e.target.value);
+
+                  if (!e.target.value) {
+                    setScheduleConfirmed(false);
+                  }
+                }}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3.5 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-100"
+              />
+
+              {!kickoffTime && (
+                <p className="mt-2 text-xs font-bold text-orange-600">
+                  Saat henüz belli değil. Boş bırakabilirsin.
+                </p>
+              )}
             </div>
 
             <div>
@@ -818,6 +942,25 @@ export default function AdminPage() {
                 placeholder="Süper Lig"
                 className="w-full rounded-xl border border-slate-200 px-4 py-3.5 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-100"
               />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-black">
+                📺 Yayın Kanalı
+              </label>
+
+              <input
+                value={broadcastChannel}
+                onChange={(e) =>
+                  setBroadcastChannel(e.target.value)
+                }
+                placeholder="beIN SPORTS 1"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3.5 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-100"
+              />
+
+              <p className="mt-2 text-xs font-bold text-slate-400">
+                Kanalı manuel olarak sen gireceksin.
+              </p>
             </div>
 
             <div>
@@ -839,6 +982,7 @@ export default function AdminPage() {
                     alt="Ev sahibi logosu"
                     className="h-14 w-14 object-contain"
                   />
+
                   <span className="text-xs font-bold text-slate-500">
                     Logo hazır
                   </span>
@@ -865,6 +1009,7 @@ export default function AdminPage() {
                     alt="Deplasman logosu"
                     className="h-14 w-14 object-contain"
                   />
+
                   <span className="text-xs font-bold text-slate-500">
                     Logo hazır
                   </span>
@@ -892,6 +1037,7 @@ export default function AdminPage() {
               <input
                 type="checkbox"
                 checked={scheduleConfirmed}
+                disabled={!kickoffTime}
                 onChange={(e) =>
                   setScheduleConfirmed(e.target.checked)
                 }
@@ -900,6 +1046,11 @@ export default function AdminPage() {
 
               <span className="font-black text-yellow-900">
                 Programı onayla
+                {!kickoffTime && (
+                  <span className="block text-xs text-orange-600">
+                    Önce saat girilmeli
+                  </span>
+                )}
               </span>
             </label>
 
@@ -948,7 +1099,11 @@ export default function AdminPage() {
                     </p>
 
                     <p className="mt-1 text-xs font-bold text-slate-400">
-                      {formatDate(match.kickoff)}
+                      {formatMatchDate(match)}
+                    </p>
+
+                    <p className="mt-1 text-xs font-black text-slate-500">
+                      📺 {match.broadcast_channel || "Yayın kanalı henüz belli değil"}
                     </p>
                   </div>
 
@@ -1109,6 +1264,10 @@ export default function AdminPage() {
                 ? "Bonus Sorusu Düzenle"
                 : "Bonus Sorusu Ekle"}
             </h2>
+
+            <p className="mt-1 text-sm font-bold text-red-700">
+              Doğru cevap maç bittikten sonra belirlenecek.
+            </p>
           </div>
 
           <div className="space-y-5 p-6">
@@ -1141,7 +1300,10 @@ export default function AdminPage() {
                 <option value="multiple_choice">
                   Çoktan Seçmeli
                 </option>
-                <option value="text">Serbest Metin</option>
+
+                <option value="text">
+                  Serbest Metin
+                </option>
               </select>
             </div>
 
@@ -1186,18 +1348,9 @@ export default function AdminPage() {
             )}
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <input
-                value={correctAnswer}
-                onChange={(e) =>
-                  setCorrectAnswer(e.target.value)
-                }
-                placeholder={
-                  bonusType === "multiple_choice"
-                    ? "Doğru cevap: A/B/C/D"
-                    : "Doğru cevap"
-                }
-                className="rounded-xl border border-slate-200 px-4 py-3.5"
-              />
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 font-bold text-slate-500">
+                🔒 Doğru cevap maç bittikten sonra girilecek.
+              </div>
 
               <input
                 type="number"
@@ -1230,65 +1383,135 @@ export default function AdminPage() {
           </h2>
 
           <div className="grid gap-5 lg:grid-cols-2">
-            {bonusQuestions.map((bonus) => (
-              <article
-                key={bonus.id}
-                className="rounded-3xl border border-red-100 bg-white p-5 shadow-sm"
-              >
-                <p className="text-xs font-black text-red-600">
-                  {getMatchName(bonus.match_id)}
-                </p>
+            {bonusQuestions.map((bonus) => {
+              const relatedMatch = matches.find(
+                (match) => match.id === bonus.match_id
+              );
 
-                <h3 className="mt-2 text-lg font-black">
-                  {bonus.question}
-                </h3>
+              const matchFinished =
+                relatedMatch?.status === "finished";
 
-                {bonus.question_type === "multiple_choice" && (
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <b>A:</b> {bonus.option_a}
+              return (
+                <article
+                  key={bonus.id}
+                  className="rounded-3xl border border-red-100 bg-white p-5 shadow-sm"
+                >
+                  <p className="text-xs font-black text-red-600">
+                    {getMatchName(bonus.match_id)}
+                  </p>
+
+                  <h3 className="mt-2 text-lg font-black">
+                    {bonus.question}
+                  </h3>
+
+                  {bonus.question_type === "multiple_choice" && (
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <b>A:</b> {bonus.option_a}
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <b>B:</b> {bonus.option_b}
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <b>C:</b> {bonus.option_c}
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <b>D:</b> {bonus.option_d}
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <b>B:</b> {bonus.option_b}
-                    </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <b>C:</b> {bonus.option_c}
-                    </div>
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <b>D:</b> {bonus.option_d}
-                    </div>
+                  )}
+
+                  <div className="mt-4 rounded-xl bg-yellow-50 p-3">
+                    <span className="font-bold">
+                      Puan: +{bonus.points}
+                    </span>
+
+                    <span className="ml-4 font-black text-red-600">
+                      Cevap:{" "}
+                      {bonus.correct_answer || "Henüz belirlenmedi"}
+                    </span>
                   </div>
-                )}
 
-                <div className="mt-4 rounded-xl bg-yellow-50 p-3">
-                  <span className="font-bold">
-                    Puan: +{bonus.points}
-                  </span>
+                  {matchFinished && !bonus.correct_answer && (
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <p className="mb-3 text-sm font-black text-emerald-800">
+                        🏁 Maç bitti — doğru cevabı şimdi belirle
+                      </p>
 
-                  <span className="ml-4 font-black text-red-600">
-                    Cevap: {bonus.correct_answer || "—"}
-                  </span>
-                </div>
+                      {bonus.question_type ===
+                        "multiple_choice" ? (
+                        <select
+                          id={`answer-${bonus.id}`}
+                          defaultValue=""
+                          className="w-full rounded-xl border border-emerald-200 bg-white px-4 py-3.5 font-black"
+                        >
+                          <option value="">
+                            Doğru cevabı seç...
+                          </option>
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => editBonus(bonus)}
-                    className="rounded-xl bg-yellow-50 px-4 py-3 font-black text-yellow-800"
-                  >
-                    ✏️ Düzenle
-                  </button>
+                          <option value="A">A</option>
+                          <option value="B">B</option>
+                          <option value="C">C</option>
+                          <option value="D">D</option>
+                        </select>
+                      ) : (
+                        <input
+                          id={`answer-${bonus.id}`}
+                          type="text"
+                          placeholder="Gerçek doğru cevap"
+                          className="w-full rounded-xl border border-emerald-200 bg-white px-4 py-3.5"
+                        />
+                      )}
 
-                  <button
-                    type="button"
-                    onClick={() => deleteBonus(bonus.id)}
-                    className="rounded-xl bg-red-50 px-4 py-3 font-black text-red-700"
-                  >
-                    🗑️ Sil
-                  </button>
-                </div>
-              </article>
-            ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const input = document.getElementById(
+                            `answer-${bonus.id}`
+                          ) as HTMLInputElement | HTMLSelectElement;
+
+                          saveCorrectAnswer(
+                            bonus,
+                            input.value
+                          );
+                        }}
+                        disabled={loading}
+                        className="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-60"
+                      >
+                        ✅ Doğru Cevabı Kaydet ve Puanla
+                      </button>
+                    </div>
+                  )}
+
+                  {bonus.correct_answer && (
+                    <div className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">
+                      ✓ Doğru cevap belirlendi ve puanlama yapıldı.
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => editBonus(bonus)}
+                      className="rounded-xl bg-yellow-50 px-4 py-3 font-black text-yellow-800"
+                    >
+                      ✏️ Düzenle
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteBonus(bonus.id)}
+                      className="rounded-xl bg-red-50 px-4 py-3 font-black text-red-700"
+                    >
+                      🗑️ Sil
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       </div>

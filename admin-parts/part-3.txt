@@ -1,0 +1,500 @@
+﻿  const setAddedMinute = async (match: Match) => {
+    const value = window.prompt("Uzatma dakikası (örn. 4):", String(match.added_minute ?? 0));
+    if (value === null) return;
+    const minute = Number(value);
+    if (!Number.isInteger(minute) || minute < 0 || minute > 30) {
+      showError("Uzatma 0 ile 30 arasında tam sayı olmalı.");
+      return;
+    }
+    await updateLiveControl(match, { added_minute: minute });
+  };
+
+  const changeLiveScore = async (match: Match, side: "home" | "away", delta: number) => {
+    const current = side === "home" ? (match.home_score ?? 0) : (match.away_score ?? 0);
+    const next = current + delta;
+    if (next < 0) return;
+    await updateLiveControl(match, side === "home" ? { home_score: next } : { away_score: next });
+  };
+
+  const reopenMatch = async (match: Match) => {
+    const { error } = await supabase
+      .from("Matches")
+      .update({
+        status: "scheduled",
+      })
+      .eq("id", match.id);
+
+    if (error) {
+      console.error(error);
+      showError("Maç yeniden açılamadı.");
+      return;
+    }
+
+    await loadMatches();
+    showMessage("Maç yeniden açıldı.");
+  };
+
+  /* =========================================================
+     BONUS SORULAR
+  ========================================================= */
+
+  const openNewBonus = () => {
+    setEditingBonus(null);
+
+    setBonusForm({
+      question: "",
+      options: "",
+      correct_answer: "",
+      points: "10",
+      is_active: true,
+    });
+
+    setBonusModal(true);
+  };
+
+  const openEditBonus = (bonus: BonusQuestion) => {
+    setEditingBonus(bonus);
+
+    setBonusForm({
+      question: bonus.question || "",
+      options: (bonus.options || []).join("\n"),
+      correct_answer: bonus.correct_answer || "",
+      points: String(bonus.points ?? 10),
+      is_active: Boolean(bonus.is_active),
+    });
+
+    setBonusModal(true);
+  };
+
+  const saveBonus = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const question = bonusForm.question.trim();
+    const options = bonusForm.options.split("\n").map((item) => item.trim()).filter(Boolean);
+    const correct = bonusForm.correct_answer.trim();
+    const points = Number(bonusForm.points);
+
+    if (!question) return showError("Bonus sorusu boş bırakılamaz.");
+    if (options.length < 2) return showError("En az 2 seçenek gir.");
+    if (correct && !options.includes(correct)) return showError("Doğru cevap seçeneklerden biri olmalı.");
+    if (!Number.isInteger(points) || points < 0) return showError("Geçerli bir puan gir.");
+
+    setSaving(true);
+
+    const result = editingBonus
+      ? await supabase
+          .from("BonusQuestions")
+          .update({ question, options, correct_answer: correct, points, is_active: bonusForm.is_active })
+          .eq("id", editingBonus.id)
+      : await supabase
+          .from("BonusQuestions")
+          .insert({ question, options, correct_answer: correct, points, is_active: bonusForm.is_active });
+
+    setSaving(false);
+
+    if (result.error) {
+      console.error(result.error);
+      showError("Bonus sorusu kaydedilemedi: " + result.error.message);
+      return;
+    }
+
+    setBonusModal(false);
+    await loadBonusQuestions();
+    showMessage(editingBonus ? "Bonus sorusu güncellendi." : "Bonus sorusu başarıyla eklendi.");
+  };
+
+  const revealBonus = async (bonus: BonusQuestion) => {
+    if (!window.confirm("Doğru cevap açıklansın ve doğru cevaplayanlara puan verilsin mi?")) return;
+
+    const { error } = await supabase.rpc("admin_reveal_bonus_question", {
+      p_question_id: bonus.id,
+    });
+
+    if (error) {
+      console.error(error);
+      showError("Bonus sonucu açıklanamadı: " + error.message);
+      return;
+    }
+
+    await loadBonusQuestions();
+    showMessage("Doğru cevap açıklandı ve puanlar işlendi.");
+  };
+
+  const deleteBonus = async (bonus: BonusQuestion) => {
+    if (!window.confirm("Bu bonus sorusunu silmek istediğine emin misin?")) return;
+
+    const { error } = await supabase.from("BonusQuestions").delete().eq("id", bonus.id);
+
+    if (error) {
+      console.error(error);
+      showError("Bonus sorusu silinemedi: " + error.message);
+      return;
+    }
+
+    await loadBonusQuestions();
+    showMessage("Bonus sorusu silindi.");
+  };
+
+  const toggleBonus = async (bonus: BonusQuestion) => {
+    const { error } = await supabase
+      .from("BonusQuestions")
+      .update({ is_active: !bonus.is_active })
+      .eq("id", bonus.id);
+
+    if (error) {
+      console.error(error);
+      showError("Bonus sorusu güncellenemedi: " + error.message);
+      return;
+    }
+
+    await loadBonusQuestions();
+    showMessage(bonus.is_active ? "Bonus sorusu pasif yapıldı." : "Bonus sorusu aktif yapıldı.");
+  };
+
+  const openNewSurvey = () => {
+    setEditingSurvey(null);
+    setSurveyForm({ question: "", options: "", correct_answer: "", points: "5", is_active: true });
+    setSurveyModal(true);
+  };
+
+  const openEditSurvey = (survey: Survey) => {
+    setEditingSurvey(survey);
+    setSurveyForm({
+      question: survey.question || "",
+      options: (survey.options || []).join("\n"),
+      correct_answer: survey.correct_answer || "",
+      points: String(survey.points ?? 5),
+      is_active: Boolean(survey.is_active),
+    });
+    setSurveyModal(true);
+  };
+
+  const saveSurvey = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const question = surveyForm.question.trim();
+    const options = surveyForm.options.split("\n").map((item) => item.trim()).filter(Boolean);
+    const correct = surveyForm.correct_answer.trim();
+    const points = Number(surveyForm.points);
+
+    if (!question) return showError("Anket sorusu boş bırakılamaz.");
+    if (options.length < 2) return showError("En az 2 seçenek gir.");
+    if (correct && !options.includes(correct)) return showError("Doğru cevap seçeneklerden biri olmalı.");
+    if (!Number.isInteger(points) || points <= 0) return showError("Puan 0'dan büyük olmalı.");
+
+    setSaving(true);
+
+    const result = editingSurvey
+      ? await supabase
+          .from("PollQuestions")
+          .update({ question, options, correct_answer: correct || null, points, is_active: surveyForm.is_active })
+          .eq("id", editingSurvey.id)
+      : await supabase
+          .from("PollQuestions")
+          .insert({ question, options, correct_answer: correct || null, points, is_active: surveyForm.is_active });
+
+    setSaving(false);
+
+    if (result.error) {
+      console.error(result.error);
+      showError("Anket kaydedilemedi: " + result.error.message);
+      return;
+    }
+
+    setSurveyModal(false);
+    await loadSurveys();
+    showMessage(editingSurvey ? "Anket güncellendi." : "Anket başarıyla eklendi.");
+  };
+
+  const revealSurvey = async (survey: Survey) => {
+    if (!window.confirm("Doğru cevap açıklansın ve doğru cevaplayanlara puan verilsin mi?")) return;
+
+    const { error } = await supabase.rpc("admin_reveal_poll_question", {
+      p_question_id: survey.id,
+    });
+
+    if (error) {
+      console.error(error);
+      showError("Anket sonucu açıklanamadı: " + error.message);
+      return;
+    }
+
+    await loadSurveys();
+    showMessage("Anket cevabı açıklandı ve puanlar işlendi.");
+  };
+
+  const deleteSurvey = async (survey: Survey) => {
+    if (!window.confirm("Bu anket silinsin mi?")) return;
+
+    const { error } = await supabase.from("PollQuestions").delete().eq("id", survey.id);
+
+    if (error) {
+      console.error(error);
+      showError("Anket silinemedi: " + error.message);
+      return;
+    }
+
+    await loadSurveys();
+    showMessage("Anket silindi.");
+  };
+
+  const toggleSurvey = async (survey: Survey) => {
+    const { error } = await supabase
+      .from("PollQuestions")
+      .update({ is_active: !survey.is_active })
+      .eq("id", survey.id);
+
+    if (error) {
+      console.error(error);
+      showError("Anket güncellenemedi: " + error.message);
+      return;
+    }
+
+    await loadSurveys();
+    showMessage(survey.is_active ? "Anket pasif yapıldı." : "Anket aktif yapıldı.");
+  };
+
+  /* =========================================================
+     BONUS KODLARI
+  ========================================================= */
+
+  const openRankingModal = (user: AdminUser) => {
+    setRankingModalUser(user);
+    setRankingForm({ points: "", reason: "" });
+  };
+
+  const applyRankingAdjustment = async (mode: "add" | "remove" | "reset") => {
+    if (!rankingModalUser) return;
+    const current = Number(rankingPoints[rankingModalUser.id] || 0);
+    let delta = 0;
+    if (mode === "reset") {
+      if (!window.confirm(`${rankingModalUser.display_name || "Bu kullanıcı"} adlı kullanıcının sıralama puanı 0 yapılsın mı?`)) return;
+      delta = -current;
+    } else {
+      const amount = Number(rankingForm.points);
+      if (!Number.isInteger(amount) || amount <= 0) return showError("1 veya daha büyük tam sayı puan gir.");
+      if (!rankingForm.reason.trim()) return showError("İşlem nedeni gir.");
+      delta = mode === "add" ? amount : -amount;
+    }
+    if (delta === 0) {
+      setRankingModalUser(null);
+      return showMessage("Sıralama puanı zaten 0.");
+    }
+    setRankingSaving(true);
+    let { error } = await supabase.from("admin_point_adjustments").insert({ user_id: rankingModalUser.id, points: delta, reason: rankingForm.reason.trim() || (mode === "reset" ? "Admin tarafından sıralama puanı sıfırlandı" : "Admin puan düzeltmesi") });
+    if (error) {
+      const fallback = await supabase.from("admin_point_adjustments").insert({ user_id: rankingModalUser.id, points: delta });
+      error = fallback.error;
+    }
+    setRankingSaving(false);
+    if (error) return showError("Sıralama puanı güncellenemedi: " + error.message);
+    await loadRankingPoints();
+    const next = current + delta;
+    setRankingModalUser(null);
+    showMessage(`${rankingModalUser.display_name || "Kullanıcı"} sıralama puanı ${next} oldu.`);
+  };
+
+  const openActivityEdit = (activity: UserActivity) => {
+    setActivityEdit(activity);
+    setActivityForm({ home_score: "", away_score: "", answer: "", points: activity.points == null ? "0" : String(activity.points) });
+    if (activity.type === "prediction") {
+      const match = activity.detail.match(/Tahmin:\s*(-?\d+)\s*-\s*(-?\d+)/);
+      setActivityForm((p) => ({ ...p, home_score: match?.[1] || "0", away_score: match?.[2] || "0" }));
+    } else {
+      const answer = activity.detail.split("• Cevap: ")[1] || "";
+      setActivityForm((p) => ({ ...p, answer }));
+    }
+  };
+
+  const saveActivityEdit = async () => {
+    if (!activityEdit) return;
+    setActivitySaving(true);
+    let result: any;
+    const id = activityEdit.record_id;
+    const points = Number(activityForm.points);
+    if (!Number.isFinite(points)) { setActivitySaving(false); return showError("Geçerli bir puan gir."); }
+    if (activityEdit.type === "prediction") {
+      const home = Number(activityForm.home_score), away = Number(activityForm.away_score);
+      if (!Number.isInteger(home) || home < 0 || !Number.isInteger(away) || away < 0) { setActivitySaving(false); return showError("Skorlar 0 veya daha büyük tam sayı olmalı."); }
+      result = await supabase.from("Predictions").update({ home_score: home, away_score: away, points }).eq("id", id);
+    } else if (activityEdit.type === "bonus") {
+      result = await supabase.from("BonusAnswers").update({ answer: activityForm.answer, points }).eq("id", id);
+    } else if (activityEdit.type === "survey") {
+      result = await supabase.from("PollAnswers").update({ answer: activityForm.answer, points }).eq("id", id);
+    } else if (activityEdit.type === "wheel") {
+      result = await supabase.from("reward_wheel_spins").update({ points }).eq("id", id);
+    } else {
+      result = await supabase.from("bonus_code_redemptions").update({ points }).eq("id", id);
+    }
+    setActivitySaving(false);
+    if (result.error) return showError("Kullanıcı işlemi güncellenemedi: " + result.error.message);
+    setActivityEdit(null);
+    await Promise.all([loadUserActivities(), loadRankingPoints()]);
+    showMessage("Kullanıcı işlemi güncellendi.");
+  };
+
+  const deleteActivity = async (activity: UserActivity) => {
+    if (!window.confirm("Bu kullanıcı işlemi silinsin mi? Bu işlem ilgili puanı da toplamdan düşürür.")) return;
+    const table = activity.type === "prediction" ? "Predictions" : activity.type === "bonus" ? "BonusAnswers" : activity.type === "survey" ? "PollAnswers" : activity.type === "wheel" ? "reward_wheel_spins" : "bonus_code_redemptions";
+    const { error } = await supabase.from(table).delete().eq("id", activity.record_id);
+    if (error) return showError("Kullanıcı işlemi silinemedi: " + error.message);
+    await Promise.all([loadUserActivities(), loadRankingPoints()]);
+    showMessage("Kullanıcı işlemi silindi.");
+  };
+
+  const openPointModal = (user: AdminUser) => {
+    setPointModalUser(user);
+    setPointForm({ points: "", reason: "" });
+  };
+
+  const applyUserPoints = async (mode: "add" | "remove" | "reset") => {
+    if (!pointModalUser) return;
+
+    if (mode === "reset") {
+      const ok = window.confirm(
+        `${pointModalUser.display_name || "Bu kullanıcı"} adlı kullanıcının manuel puanı sıfırlansın mı?`
+      );
+      if (!ok) return;
+    }
+
+    let amount = 0;
+    if (mode === "reset") {
+      amount = 0;
+    } else {
+      amount = Number(pointForm.points);
+      if (!Number.isInteger(amount) || amount <= 0) {
+        return showError("1 veya daha büyük tam sayı puan gir.");
+      }
+      if (!pointForm.reason.trim()) {
+        return showError("İşlem nedeni gir.");
+      }
+    }
+
+    setPointSaving(true);
+    const current = Number(manualPoints[pointModalUser.id] || 0);
+    const next = mode === "reset" ? 0 : mode === "add" ? current + amount : current - amount;
+
+    const { error } = await supabase
+      .from("admin_manual_points")
+      .upsert(
+        {
+          user_id: pointModalUser.id,
+          points: next,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    setPointSaving(false);
+    if (error) {
+      return showError("Puan işlemi başarısız: " + error.message);
+    }
+
+    await loadManualPoints();
+    const name = pointModalUser.display_name || "Kullanıcı";
+    setPointModalUser(null);
+    setPointForm({ points: "", reason: "" });
+    showMessage(
+      mode === "reset"
+        ? `${name} manuel puanı sıfırlandı.`
+        : `${name} için ${mode === "add" ? "+" : "-"}${amount} puan uygulandı. Yeni manuel puan: ${next}`
+    );
+  };
+
+  const openNewCode = () => {
+    setCodeForm({
+      code: "",
+      points: "10",
+      is_active: true,
+    });
+
+    setCodeModal(true);
+  };
+
+  const saveBonusCode = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const code = codeForm.code.trim();
+
+    if (!code) {
+      showError("Bonus kodu boş bırakılamaz.");
+      return;
+    }
+
+    const points = Number(codeForm.points);
+
+    if (!Number.isInteger(points) || points < 0) {
+      showError("Geçerli bir puan gir.");
+      return;
+    }
+
+    setSaving(true);
+
+    const { error } = await supabase.rpc(
+      "admin_create_bonus_code",
+      {
+        p_code: code,
+        p_points: points,
+        p_is_active: codeForm.is_active,
+      }
+    );
+
+    setSaving(false);
+
+    if (error) {
+      console.error(error);
+      showError(error.message);
+      return;
+    }
+
+    setCodeModal(false);
+
+    await loadBonusCodes();
+
+    showMessage("Bonus kodu başarıyla eklendi.");
+  };
+
+  const toggleBonusCode = async (code: BonusCode) => {
+    setCodeSavingId(code.id);
+
+    const { error } = await supabase.rpc(
+      "admin_set_bonus_code_status",
+      {
+        p_code_id: code.id,
+        p_is_active: !code.is_active,
+      }
+    );
+
+    setCodeSavingId(null);
+
+    if (error) {
+      console.error(error);
+      showError(error.message);
+      return;
+    }
+
+    await loadBonusCodes();
+
+    showMessage(
+      `${code.code} ${
+        code.is_active ? "pasif" : "aktif"
+      } yapıldı.`
+    );
+  };
+
+  /* =========================================================
+     GENEL
+  ========================================================= */
+
+  const openNewPlayer = () => {
+    setEditingPlayer(null);
+    setPlayerForm({ ...emptyPlayerForm });
+    setPlayerModal(true);
+  };
+
+  const openEditPlayer = (player: Player) => {
+    setEditingPlayer(player);
+    setPlayerForm({
+      name: player.name || "",
+      jersey_number: player.jersey_number == null ? "" : String(player.jersey_number),
+      position: player.position || "",

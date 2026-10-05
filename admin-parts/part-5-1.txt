@@ -1,0 +1,279 @@
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() =>
+                setActiveSection(
+                  key as
+                    | "matches"
+                    | "bonus"
+                    | "users"
+                    | "codes"
+                    | "players"
+                    | "wheel"
+                )
+              }
+              className={`rounded-xl px-3 py-3 text-xs font-extrabold sm:text-sm ${
+                activeSection === key
+                  ? "bg-[#0f2747] text-white"
+                  : "text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* =====================================================
+            MAÇLAR
+        ===================================================== */}
+
+        {activeSection === "matches" && <section className="mt-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-blue-600">Maç Yönetimi</p><h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Maçlar</h2></div><button type="button" onClick={openNewMatch} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-extrabold text-white">+ Yeni Maç</button></div><div className="mt-4 space-y-3">{matches.length === 0 ? <Empty text="Henüz maç yok." /> : matches.map((match) => <div key={match.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-700">{match.league || "Futbol"}</span><span className={`rounded-md px-2 py-1 text-[9px] font-bold ${match.status === "finished" ? "bg-emerald-50 text-emerald-700" : match.status === "live" ? "bg-red-50 text-red-700" : match.status === "halftime" ? "bg-orange-50 text-orange-700" : match.status === "cancelled" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{match.status === "finished" ? "Maç Sonu" : match.status === "live" ? "CANLI" : match.status === "halftime" ? "Devre Arasý" : match.status === "cancelled" ? "Ýptal" : "Planlandý"}</span></div><h3 className="mt-3 text-lg font-extrabold text-[#0f2747]">{match.home_team} <span className="mx-1 text-slate-300">-</span> {match.away_team}</h3><p className="mt-1 text-xs font-semibold text-slate-400">{formatDate(match.kickoff)}{match.broadcaster ? ` • ${match.broadcaster}` : ""}</p>{(match.status === "live" || match.status === "halftime" || match.status === "finished") && <div className="mt-2"><p className="text-xl font-black text-[#0f2747]">{match.home_score ?? 0} - {match.away_score ?? 0}</p>{(match.status === "live" || match.status === "halftime") && <p className="mt-1 text-sm font-black text-red-600">{match.live_minute ?? 0}{(match.added_minute ?? 0) > 0 ? `+${match.added_minute}` : ""}'</p>}</div>}</div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openLineupManager(match)} className="rounded-xl bg-cyan-600 px-3 py-2.5 text-xs font-bold text-white">Kadro</button><button type="button" onClick={() => openEditMatch(match)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Düzenle</button>{(match.status === "live" || match.status === "halftime") ? <><button type="button" onClick={() => setLiveMinute(match)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">? Dakika</button><button type="button" onClick={() => setAddedMinute(match)} className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-bold text-white">? Uzatma</button><button type="button" onClick={() => changeLiveScore(match, "home", 1)} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">? Ev +1</button><button type="button" onClick={() => changeLiveScore(match, "away", 1)} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">? Dep +1</button><button type="button" onClick={() => changeLiveScore(match, "home", -1)} className="rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-white">Ev -1</button><button type="button" onClick={() => changeLiveScore(match, "away", -1)} className="rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-white">Dep -1</button></> : null}{match.status === "scheduled" || !match.status ? <button type="button" onClick={() => setMatchStatus(match, "live")} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">?? CANLI</button> : null}{match.status === "live" ? <button type="button" onClick={() => setMatchStatus(match, "halftime")} className="rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold text-white">? Devre Arasý</button> : null}{match.status === "halftime" ? <button type="button" onClick={() => setMatchStatus(match, "live")} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">? CANLI</button> : null}{match.status === "live" || match.status === "halftime" ? <button type="button" onClick={() => setMatchStatus(match, "finished")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">?? Maç Sonu</button> : null}{match.status === "finished" ? <button type="button" onClick={() => reopenMatch(match)} className="rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-white">Yeniden Aç</button> : null}<button type="button" onClick={() => deleteMatch(match)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">Sil</button></div></div></div>)}</div></section>}
+
+        {activeSection === "bonus" && <section className="mt-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-purple-600">Bonus Yönetimi</p><h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Bonus Sorularý</h2></div><button type="button" onClick={openNewBonus} className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-extrabold text-white">+ Yeni Soru</button></div><div className="mt-4 space-y-3">{bonusQuestions.length === 0 ? <Empty text="Henüz bonus sorusu yok." /> : bonusQuestions.map((bonus) => <div key={bonus.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div className="flex-1"><div className="flex flex-wrap gap-2"><span className={`rounded-md px-2 py-1 text-[9px] font-bold ${bonus.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{bonus.is_active ? "Aktif" : "Pasif"}</span><span className="rounded-md bg-purple-50 px-2 py-1 text-[9px] font-bold text-purple-700">{bonus.points} puan</span><span className={`rounded-md px-2 py-1 text-[9px] font-bold ${bonus.answer_revealed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{bonus.answer_revealed ? "Cevap Açýklandý" : "Cevap Gizli"}</span></div><h3 className="mt-3 font-extrabold text-[#0f2747]">{bonus.question}</h3><div className="mt-2 space-y-1 text-xs text-slate-500">{(bonus.options || []).map((option) => <p key={option}>• {option}</p>)}</div><p className="mt-3 text-xs font-bold text-emerald-600">Doðru cevap: {bonus.correct_answer || "Belirlenmedi"}</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditBonus(bonus)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Düzenle</button><button type="button" onClick={() => toggleBonus(bonus)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">{bonus.is_active ? "Pasifleþtir" : "Aktifleþtir"}</button>{!bonus.answer_revealed && <button type="button" onClick={() => revealBonus(bonus)} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Cevabý Açýkla + Puanla</button>}<button type="button" onClick={() => deleteBonus(bonus)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">Sil</button></div></div></div>)}</div></section>}
+
+        {activeSection === "surveys" && (
+          <section className="mt-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-purple-600">Anket Yönetimi</p>
+                <h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Anketler</h2>
+                <p className="mt-1 text-sm text-slate-500">Kullanýcýlarýn cevaplayacaðý anketleri buradan ekle ve yönet.</p>
+              </div>
+              <button type="button" onClick={openNewSurvey} className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-extrabold text-white">+ Yeni Anket</button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {surveys.length === 0 ? <Empty text="Henüz anket yok." /> : surveys.map((survey) => (
+                <div key={survey.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex-1">
+                      <div className="flex flex-wrap gap-2">
+                        <span className={`rounded-md px-2 py-1 text-[9px] font-bold ${survey.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{survey.is_active ? "Aktif" : "Pasif"}</span>
+                        <span className="rounded-md bg-purple-50 px-2 py-1 text-[9px] font-bold text-purple-700">{survey.points} puan</span>
+                      </div>
+                      <h3 className="mt-3 font-extrabold text-[#0f2747]">{survey.question}</h3>
+                      <div className="mt-2 space-y-1 text-xs text-slate-500">{(survey.options || []).map((option) => <p key={option}>• {option}</p>)}</div>
+                      <p className="mt-3 text-xs font-bold text-emerald-600">Doðru cevap: {survey.correct_answer || "Belirlenmedi"}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => openEditSurvey(survey)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">Düzenle</button>
+                      <button type="button" onClick={() => toggleSurvey(survey)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">{survey.is_active ? "Pasifleþtir" : "Aktifleþtir"}</button>
+                      {!survey.answer_revealed && <button type="button" onClick={() => revealSurvey(survey)} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Cevabý Açýkla + Puanla</button>}
+                      <button type="button" onClick={() => deleteSurvey(survey)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white">Sil</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {(["activity", "predictions", "userBonus", "userSurveys", "userWheel", "userCodes"] as const).includes(activeSection as any) && (
+          <section className="mt-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Kullanýcý Aktivitesi</p>
+                <h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">{activeSection === "activity" ? "Tüm Kullanýcý Hareketleri" : activeSection === "predictions" ? "Kullanýcý Tahminleri" : activeSection === "userBonus" ? "Kullanýcý Bonus Sorularý" : activeSection === "userSurveys" ? "Kullanýcý Anket Cevaplarý" : activeSection === "userWheel" ? "Kullanýcý Çark Çevirme" : "Kod Kullanýmlarý"}</h2>
+                <p className="mt-1 text-sm text-slate-500">Kullanýcýlarýn yaptýðý iþlemleri tarih sýrasýyla görebilirsin.</p>
+              </div>
+              <button type="button" onClick={loadUserActivities} className="rounded-xl bg-[#0f2747] px-4 py-2.5 text-xs font-extrabold text-white">? Yenile</button>
+            </div>
+
+            {activeSection === "activity" && (
+              <div className="mt-4 flex flex-wrap gap-2">{[["all","Tümü"],["prediction","Tahminler"],["bonus","Bonus"],["survey","Anket"],["wheel","Çark"],["code","Kod"]].map(([key,label]) => <button key={key} type="button" onClick={() => setActivityFilter(key as any)} className={`rounded-xl px-3 py-2 text-xs font-extrabold ${activityFilter === key ? "bg-[#0f2747] text-white" : "bg-white text-slate-500 border border-slate-200"}`}>{label}</button>)}</div>
+            )}
+
+            {activityLoading ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-bold text-slate-400">Aktiviteler yükleniyor...</div> : (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[850px] w-full text-left">
+                    <thead className="bg-slate-50"><tr><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Tarih</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Kullanýcý</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Ýþlem</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Detay</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Puan</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Ýþlem</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {activities.filter((a) => { if (activeSection === "activity") return activityFilter === "all" || a.type === activityFilter; if (activeSection === "predictions") return a.type === "prediction"; if (activeSection === "userBonus") return a.type === "bonus"; if (activeSection === "userSurveys") return a.type === "survey"; if (activeSection === "userWheel") return a.type === "wheel"; return a.type === "code"; }).map((a) => { const u = users.find((x) => x.id === a.user_id); return <tr key={a.id}><td className="px-4 py-4 text-xs font-bold text-slate-500">{new Intl.DateTimeFormat("tr-TR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }).format(new Date(a.created_at))}</td><td className="px-4 py-4"><p className="text-sm font-extrabold text-[#0f2747]">{u?.display_name || "Ýsimsiz"}</p><p className="text-[10px] text-slate-400">{u?.email || a.user_id}</p></td><td className="px-4 py-4 text-sm font-extrabold text-[#0f2747]">{a.title}</td><td className="max-w-[420px] px-4 py-4 text-xs font-semibold text-slate-500">{a.detail}</td><td className="px-4 py-4">{a.points == null ? <span className="text-xs text-slate-400">-</span> : <span className={`rounded-lg px-2.5 py-1.5 text-xs font-black ${a.points > 0 ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{a.points > 0 ? "+" : ""}{a.points}</span>}</td><td className="px-4 py-4"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openActivityEdit(a)} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[10px] font-extrabold text-white">? Düzenle</button><button type="button" onClick={() => deleteActivity(a)} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-[10px] font-extrabold text-white">?? Sil</button></div></td></tr>; })}
+                      {activities.filter((a) => activeSection === "activity" ? (activityFilter === "all" || a.type === activityFilter) : activeSection === "predictions" ? a.type === "prediction" : activeSection === "userBonus" ? a.type === "bonus" : activeSection === "userSurveys" ? a.type === "survey" : activeSection === "userWheel" ? a.type === "wheel" : a.type === "code").length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm font-bold text-slate-400">Henüz kayýt bulunmuyor.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeSection === "users" && <section className="mt-5"><div><p className="text-xs font-bold uppercase tracking-widest text-blue-600">Kullanýcý Yönetimi</p><h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Kullanýcýlar</h2><p className="mt-1 text-sm text-slate-500">Kullanýcýlarýn manuel puanlarýný buradan ekleyebilir, silebilir veya tamamen sýfýrlayabilirsin.</p></div><div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="min-w-full text-left"><thead className="bg-slate-50"><tr><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Kullanýcý</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">E-posta</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Takým</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Sýralama Puaný</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Manuel Puan</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Admin</th><th className="px-4 py-3 text-xs font-extrabold text-slate-500">Ýþlem</th></tr></thead><tbody className="divide-y divide-slate-100">{users.map((user) => { const points = Number(manualPoints[user.id] || 0); return <tr key={user.id}><td className="px-4 py-4 text-sm font-bold text-[#0f2747]">{user.display_name || "Ýsimsiz"}</td><td className="px-4 py-4 text-sm text-slate-500">{user.email || "-"}</td><td className="px-4 py-4 text-sm text-slate-500">{user.favorite_team || "-"}</td><td className="px-4 py-4"><span className={`rounded-lg px-3 py-1.5 text-sm font-black ${(rankingPoints[user.id] || 0) >= 0 ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>{(rankingPoints[user.id] || 0) > 0 ? "+" : ""}{rankingPoints[user.id] || 0}</span></td><td className="px-4 py-4"><span className={`rounded-lg px-3 py-1.5 text-sm font-black ${points >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{points > 0 ? "+" : ""}{points}</span></td><td className="px-4 py-4 text-sm">{user.is_admin ? <span className="rounded-md bg-purple-50 px-2 py-1 text-xs font-bold text-purple-700">Admin</span> : <span className="text-slate-400">Kullanýcý</span>}</td><td className="px-4 py-4"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openRankingModal(user)} className="rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-extrabold text-white">?? Sýralama Puaný</button><button type="button" onClick={() => openPointModal(user)} className="rounded-xl bg-[#0f2747] px-3 py-2.5 text-xs font-extrabold text-white">? Manuel Puan</button></div></td></tr>; })}</tbody></table>{users.length === 0 && <div className="p-10 text-center text-sm font-semibold text-slate-400">Henüz kullanýcý yok.</div>}</div></div></section>}
+
+        {activeSection === "codes" && <section className="mt-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-orange-600">Ödül Yönetimi</p><h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Bonus Kodlarý</h2></div><button type="button" onClick={openNewCode} className="rounded-xl bg-orange-500 px-5 py-3 text-sm font-extrabold text-white">+ Yeni Kod</button></div><div className="mt-4 grid gap-3 md:grid-cols-2">{bonusCodes.length === 0 ? <Empty text="Henüz bonus kodu yok." /> : bonusCodes.map((code) => <div key={code.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-xl font-black tracking-wider text-[#0f2747]">{code.code}</p><p className="mt-1 text-sm font-bold text-orange-600">+{code.points} puan</p><p className="mt-1 text-xs text-slate-400">Kullaným: {code.usage_count}</p></div><span className={`rounded-md px-2 py-1 text-[9px] font-bold ${code.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{code.is_active ? "Aktif" : "Pasif"}</span></div><button type="button" disabled={codeSavingId === code.id} onClick={() => toggleBonusCode(code)} className="mt-4 w-full rounded-xl bg-[#0f2747] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">{codeSavingId === code.id ? "Kaydediliyor..." : code.is_active ? "Pasifleþtir" : "Aktifleþtir"}</button></div>)}</div></section>}
+
+        {activeSection === "wheel" && (
+          <section className="mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-pink-600">Ödül Yönetimi</p>
+                  <h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">?? Ödül Çarký</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">Toplam 10 dilim vardýr. 8 dilime 5–30 puan arasýnda ödül, 2 dilime ise boþ sonuç verebilirsin.</p>
+                </div>
+                <div className="rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-center">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-pink-500">Dilim</p>
+                  <p className="mt-1 text-xl font-black text-pink-700">10 / 10</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((slot) => {
+                  const option = wheelOptions.find((item) => item.slot === slot);
+                  const current = option?.points ?? null;
+                  const saving = wheelSavingSlot === slot;
+
+                  return (
+                    <div key={slot} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="rounded-lg bg-[#0f2747] px-2.5 py-1 text-[10px] font-black text-white">#{slot}</span>
+                        <span className={`rounded-lg px-2.5 py-1 text-[10px] font-black ${current === null ? "bg-slate-200 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+                          {current === null ? "BOÞ" : `+${current} PUAN`}
+                        </span>
+                      </div>
+
+                      <select
+                        value={current === null ? "empty" : String(current)}
+                        disabled={saving}
+                        onChange={(e) => {
+                          const value = e.target.value === "empty" ? null : Number(e.target.value);
+                          saveWheelSlot(slot, value);
+                        }}
+                        className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-extrabold text-slate-800 outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-100 disabled:opacity-50"
+                      >
+                        <option value="empty">BOÞ</option>
+                        {Array.from({ length: 26 }, (_, i) => i + 5).map((points) => (
+                          <option key={points} value={points}>
+                            +{points} puan
+                          </option>
+                        ))}
+                      </select>
+
+                      {saving && <p className="mt-2 text-[10px] font-bold text-pink-600">Kaydediliyor...</p>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <p className="text-xs font-extrabold text-blue-700">Nasýl çalýþýr?</p>
+                <p className="mt-1 text-xs leading-5 text-blue-600">Kullanýcý çarký çevirdiðinde aktif 10 dilimden biri rastgele seçilir. Seçilen dilim boþsa puan kazanýlmaz. Puanlar sadece 5–30 arasýnda olabilir.</p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeSection === "players" && <section className="mt-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-cyan-600">Oyuncu Yönetimi</p><h2 className="mt-1 text-2xl font-extrabold text-[#0f2747]">Oyuncular</h2><p className="mt-1 text-sm text-slate-500">Gol ve asist sayýlarýný istediðin zaman güncelleyebilirsin.</p></div><button type="button" onClick={openNewPlayer} className="rounded-xl bg-cyan-600 px-5 py-3 text-sm font-extrabold text-white">+ Oyuncu Ekle</button></div><div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{players.length === 0 ? <div className="sm:col-span-2 lg:col-span-3"><Empty text="Henüz oyuncu eklenmedi." /></div> : players.map((player) => <div key={player.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex gap-4 p-5"><div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-slate-100">{player.photo_url ? <img src={getPlayerPhotoUrl(player.photo_url) || "/placeholder-player.png"} alt={player.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-3xl">??</div>}</div><div className="min-w-0 flex-1"><h3 className="truncate text-lg font-extrabold text-[#0f2747]">{player.name}</h3><p className="mt-1 text-xs font-bold text-slate-400">{player.team ? `${player.team} • ` : ""}{player.jersey_number != null ? `#${player.jersey_number}` : "Forma yok"}{player.position ? ` • ${player.position}` : ""}</p><div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-xl bg-slate-50 p-2"><p className="text-[9px] font-bold uppercase text-slate-400">Gol</p><p className="text-xl font-black text-emerald-600">{player.goals}</p></div><div className="rounded-xl bg-slate-50 p-2"><p className="text-[9px] font-bold uppercase text-slate-400">Asist</p><p className="text-xl font-black text-blue-600">{player.assists}</p></div></div></div></div><div className="flex gap-2 border-t border-slate-100 p-4"><button type="button" onClick={() => openEditPlayer(player)} className="flex-1 rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-bold text-white">Düzenle / Ýstatistik Güncelle</button><button type="button" onClick={() => deletePlayer(player)} className="rounded-xl bg-red-600 px-4 py-2.5 text-xs font-bold text-white">Sil</button></div></div>)}</div></section>}
+      </div>
+
+      {lineupModal && (
+        <Modal title={`Maç Kadrosu • ${lineupModal.home_team} - ${lineupModal.away_team}`} onClose={() => setLineupModal(null)}>
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
+              <p className="text-sm font-extrabold text-cyan-800">Kadroyu belirle</p>
+              <p className="mt-1 text-xs leading-5 text-cyan-700">Oyuncunun hangi takýmda olduðunu ve Ýlk 11, Yedek veya Eksik durumunu seç. Eksik oyuncularda nedenini de yazabilirsin.</p>
+            </div>
+
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+              {players.length === 0 ? (
+                <Empty text="Önce Oyuncular bölümünden oyuncu eklemelisin." />
+              ) : players.map((player) => {
+                const row = lineupRows[player.id] || { team: "home" as const, status: "substitute" as const, absence_reason: "" };
+                return (
+                  <div key={player.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-slate-100">
+                        {player.photo_url ? <img src={getPlayerPhotoUrl(player.photo_url) || "/placeholder-player.png"} alt={player.name} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-xl">??</div>}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-extrabold text-[#0f2747]">{player.name}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-slate-400">{player.team || "Takým belirtilmemiþ"}{player.jersey_number != null ? ` • #${player.jersey_number}` : ""}{player.position ? ` • ${player.position}` : ""}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <select value={row.team} onChange={(e) => updateLineupRow(player.id, { team: e.target.value as "home" | "away" })} className={inputClass}>
+                        <option value="home">?? {lineupModal.home_team}</option>
+                        <option value="away">?? {lineupModal.away_team}</option>
+                      </select>
+                      <select value={row.status} onChange={(e) => updateLineupRow(player.id, { status: e.target.value as "starting" | "substitute" | "absent" })} className={inputClass}>
+                        <option value="starting">?? Ýlk 11</option>
+                        <option value="substitute">?? Yedek</option>
+                        <option value="absent">?? Eksik</option>
+                      </select>
+                    </div>
+
+                    {row.status === "absent" && (
+                      <input value={row.absence_reason} onChange={(e) => updateLineupRow(player.id, { absence_reason: e.target.value })} className={`${inputClass} mt-2`} placeholder="Eksiklik nedeni: Sakat, cezalý..." />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setLineupModal(null)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-extrabold text-slate-600">Ýptal</button>
+              <button type="button" disabled={lineupSaving} onClick={saveMatchLineups} className="rounded-xl bg-cyan-600 px-5 py-3 text-sm font-extrabold text-white disabled:opacity-50">{lineupSaving ? "Kaydediliyor..." : "Kadroyu Kaydet"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {matchModal && <Modal title={editingMatch ? "Maçý Düzenle" : "Yeni Maç"} onClose={() => setMatchModal(false)}><form onSubmit={saveMatch} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Lig"><input value={matchForm.league} onChange={(e) => setMatchForm((p) => ({ ...p, league: e.target.value }))} className={inputClass} placeholder="Premier League" /></Field><Field label="Yayýncý"><input value={matchForm.broadcaster} onChange={(e) => setMatchForm((p) => ({ ...p, broadcaster: e.target.value }))} className={inputClass} placeholder="beIN Sports" /></Field><Field label="Ev sahibi"><input required value={matchForm.home_team} onChange={(e) => setMatchForm((p) => ({ ...p, home_team: e.target.value }))} className={inputClass} /></Field><Field label="Deplasman"><input required value={matchForm.away_team} onChange={(e) => setMatchForm((p) => ({ ...p, away_team: e.target.value }))} className={inputClass} /></Field><Field label="Maç tarihi"><input type="date" value={matchForm.match_date} onChange={(e) => setMatchForm((p) => ({ ...p, match_date: e.target.value, kickoff: p.kickoff && p.kickoff.includes("T") ? `${e.target.value}T${p.kickoff.slice(11, 16)}` : "" }))} className={inputClass} /></Field><Field label="Saat (isteðe baðlý)"><input type="time" value={matchForm.kickoff ? matchForm.kickoff.slice(11, 16) : ""} onChange={(e) => setMatchForm((p) => ({ ...p, kickoff: e.target.value ? `${p.match_date}T${e.target.value}` : "" }))} className={inputClass} /></Field><Field label="Ev sahibi skor"><input type="number" min="0" value={matchForm.home_score} onChange={(e) => setMatchForm((p) => ({ ...p, home_score: e.target.value }))} className={inputClass} /></Field><Field label="Deplasman skor"><input type="number" min="0" value={matchForm.away_score} onChange={(e) => setMatchForm((p) => ({ ...p, away_score: e.target.value }))} className={inputClass} /></Field><div className="flex items-end"><label className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-3 text-sm font-bold"><input type="checkbox" checked={matchForm.schedule_confirmed} onChange={(e) => setMatchForm((p) => ({ ...p, schedule_confirmed: e.target.checked }))} /> Fikstür kesinleþti</label></div></div><div className="grid gap-4 sm:grid-cols-2"><LogoUpload label="Ev sahibi logosu" value={matchForm.home_logo_url} uploading={uploadingLogo === "home"} onChange={(e) => uploadTeamLogo(e, "home")} /><LogoUpload label="Deplasman logosu" value={matchForm.away_logo_url} uploading={uploadingLogo === "away"} onChange={(e) => uploadTeamLogo(e, "away")} /></div><ModalButtons saving={saving} onCancel={() => setMatchModal(false)} submitText={editingMatch ? "Güncelle" : "Maçý Kaydet"} /></form></Modal>}
+
+      {surveyModal && (
+        <Modal title={editingSurvey ? "Anketi Düzenle" : "Yeni Anket"} onClose={() => setSurveyModal(false)}>
+          <form onSubmit={saveSurvey} className="space-y-4">
+            <Field label="Anket sorusu"><textarea required value={surveyForm.question} onChange={(e) => setSurveyForm((p) => ({ ...p, question: e.target.value }))} className={`${inputClass} min-h-24`} /></Field>
+            <Field label="Seçenekler (her satýra bir seçenek)"><textarea required value={surveyForm.options} onChange={(e) => setSurveyForm((p) => ({ ...p, options: e.target.value }))} className={`${inputClass} min-h-28`} placeholder={'A\nB\nC\nD'} /></Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Doðru cevap (istersen þimdi, istersen daha sonra)"><input value={surveyForm.correct_answer} onChange={(e) => setSurveyForm((p) => ({ ...p, correct_answer: e.target.value }))} className={inputClass} /></Field>
+              <Field label="Puan"><input type="number" min="1" value={surveyForm.points} onChange={(e) => setSurveyForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} /></Field>
+            </div>
+            <label className="flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={surveyForm.is_active} onChange={(e) => setSurveyForm((p) => ({ ...p, is_active: e.target.checked }))} /> Aktif</label>
+            <ModalButtons saving={saving} onCancel={() => setSurveyModal(false)} submitText={editingSurvey ? "Güncelle" : "Anketi Kaydet"} />
+          </form>
+        </Modal>
+      )}
+
+      {bonusModal && <Modal title={editingBonus ? "Bonus Sorusunu Düzenle" : "Yeni Bonus Sorusu"} onClose={() => setBonusModal(false)}><form onSubmit={saveBonus} className="space-y-4"><Field label="Soru"><textarea required value={bonusForm.question} onChange={(e) => setBonusForm((p) => ({ ...p, question: e.target.value }))} className={`${inputClass} min-h-24`} /></Field><Field label="Seçenekler (her satýra bir seçenek)"><textarea value={bonusForm.options} onChange={(e) => setBonusForm((p) => ({ ...p, options: e.target.value }))} className={`${inputClass} min-h-28`} placeholder={'A\nB\nC\nD'} /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Doðru cevap (istersen þimdi, istersen maç sonu)"><input value={bonusForm.correct_answer} onChange={(e) => setBonusForm((p) => ({ ...p, correct_answer: e.target.value }))} className={inputClass} /></Field><Field label="Puan"><input type="number" min="0" value={bonusForm.points} onChange={(e) => setBonusForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} /></Field></div><label className="flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={bonusForm.is_active} onChange={(e) => setBonusForm((p) => ({ ...p, is_active: e.target.checked }))} /> Aktif</label><ModalButtons saving={saving} onCancel={() => setBonusModal(false)} submitText={editingBonus ? "Güncelle" : "Soruyu Kaydet"} /></form></Modal>}
+
+      {rankingModalUser && <Modal title={`${rankingModalUser.display_name || "Kullanýcý"} — Sýralama Puaný`} onClose={() => setRankingModalUser(null)}><div className="space-y-4"><div className="rounded-2xl border border-blue-100 bg-blue-50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-blue-500">Mevcut sýralama puaný</p><p className="mt-1 text-3xl font-black text-[#0f2747]">{rankingPoints[rankingModalUser.id] || 0}</p><p className="mt-1 text-xs font-semibold text-blue-600">Bu deðer maç + bonus + anket + çark + kod + admin düzeltmelerinin toplamýdýr.</p></div><Field label="Puan"><input type="number" min="1" step="1" value={rankingForm.points} onChange={(e) => setRankingForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} placeholder="Örn. 50" /></Field><Field label="Ýþlem nedeni"><input value={rankingForm.reason} onChange={(e) => setRankingForm((p) => ({ ...p, reason: e.target.value }))} className={inputClass} placeholder="Ödül, düzeltme, ceza..." /></Field><div className="grid gap-2 sm:grid-cols-3"><button type="button" disabled={rankingSaving} onClick={() => applyRankingAdjustment("add")} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">? Puan Ekle</button><button type="button" disabled={rankingSaving} onClick={() => applyRankingAdjustment("remove")} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">? Puan Azalt</button><button type="button" disabled={rankingSaving} onClick={() => applyRankingAdjustment("reset")} className="rounded-xl bg-slate-700 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">?? Sýfýrla</button></div><p className="text-[11px] font-semibold text-slate-400">Sýfýrlama geçmiþ kayýtlarý silmez; mevcut toplamý 0'a getiren admin düzeltmesi oluþturur.</p></div></Modal>}
+
+      {activityEdit && <Modal title={`${activityEdit.title} — Düzenle`} onClose={() => setActivityEdit(null)}><div className="space-y-4"><div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold text-slate-400">Kullanýcý</p><p className="mt-1 font-extrabold text-[#0f2747]">{users.find((u) => u.id === activityEdit.user_id)?.display_name || "Ýsimsiz"}</p><p className="mt-1 text-xs text-slate-500">{activityEdit.detail}</p></div>{activityEdit.type === "prediction" ? <div className="grid gap-3 sm:grid-cols-2"><Field label="Ev sahibi skoru"><input type="number" min="0" value={activityForm.home_score} onChange={(e) => setActivityForm((p) => ({ ...p, home_score: e.target.value }))} className={inputClass} /></Field><Field label="Deplasman skoru"><input type="number" min="0" value={activityForm.away_score} onChange={(e) => setActivityForm((p) => ({ ...p, away_score: e.target.value }))} className={inputClass} /></Field></div> : activityEdit.type !== "wheel" && activityEdit.type !== "code" ? <Field label="Cevap"><input value={activityForm.answer} onChange={(e) => setActivityForm((p) => ({ ...p, answer: e.target.value }))} className={inputClass} /></Field> : null}<Field label="Puan"><input type="number" step="1" value={activityForm.points} onChange={(e) => setActivityForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} /></Field><div className="flex gap-2"><button type="button" disabled={activitySaving} onClick={saveActivityEdit} className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">{activitySaving ? "Kaydediliyor..." : "Kaydet"}</button><button type="button" onClick={() => setActivityEdit(null)} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-extrabold text-slate-600">Ýptal</button></div></div></Modal>}
+
+      {pointModalUser && <Modal title={`${pointModalUser.display_name || "Kullanýcý"} — Puan Yönetimi`} onClose={() => setPointModalUser(null)}><div className="space-y-4"><div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Kullanýcý</p><p className="mt-1 text-lg font-extrabold text-[#0f2747]">{pointModalUser.display_name || "Ýsimsiz"}</p><p className="text-xs text-slate-500">{pointModalUser.email || "-"}</p><p className="mt-3 text-sm font-bold text-slate-600">Mevcut manuel puan: <span className="text-[#0f2747]">{manualPoints[pointModalUser.id] || 0}</span></p></div><Field label="Puan"><input type="number" min="1" step="1" value={pointForm.points} onChange={(e) => setPointForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} placeholder="Örn. 50" /></Field><Field label="Ýþlem nedeni"><input value={pointForm.reason} onChange={(e) => setPointForm((p) => ({ ...p, reason: e.target.value }))} className={inputClass} placeholder="Ödül, düzeltme, etkinlik..." /></Field><div className="grid gap-2 sm:grid-cols-3"><button type="button" disabled={pointSaving} onClick={() => applyUserPoints("add")} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">? Puan Ekle</button><button type="button" disabled={pointSaving} onClick={() => applyUserPoints("remove")} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">? Puan Sil</button><button type="button" disabled={pointSaving} onClick={() => applyUserPoints("reset")} className="rounded-xl bg-slate-700 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-50">?? Sýfýrla</button></div><p className="text-[11px] font-semibold text-slate-400">Not: Bu iþlemler manuel puaný deðiþtirir; maç tahminlerinden kazanýlan puanlarý silmez.</p></div></Modal>}
+
+      {codeModal && <Modal title="Yeni Bonus Kodu" onClose={() => setCodeModal(false)}><form onSubmit={saveBonusCode} className="space-y-4"><Field label="Kod"><input required value={codeForm.code} onChange={(e) => setCodeForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} className={inputClass} placeholder="FUTBOL10" /></Field><Field label="Puan"><input type="number" min="0" value={codeForm.points} onChange={(e) => setCodeForm((p) => ({ ...p, points: e.target.value }))} className={inputClass} /></Field><label className="flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={codeForm.is_active} onChange={(e) => setCodeForm((p) => ({ ...p, is_active: e.target.checked }))} /> Aktif</label><ModalButtons saving={saving} onCancel={() => setCodeModal(false)} submitText="Bonus Kodunu Kaydet" /></form></Modal>}
+
+      {playerModal && <Modal title={editingPlayer ? "Oyuncuyu Düzenle" : "Oyuncu Ekle"} onClose={() => setPlayerModal(false)}><form onSubmit={savePlayer} className="space-y-4"><Field label="Oyuncu adý"><input required value={playerForm.name} onChange={(e) => setPlayerForm((p) => ({ ...p, name: e.target.value }))} className={inputClass} placeholder="Kylian Mbappé" /></Field><Field label="Takým"><input value={playerForm.team} onChange={(e) => setPlayerForm((p) => ({ ...p, team: e.target.value }))} className={inputClass} placeholder="Real Madrid" /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Forma numarasý"><input type="number" min="0" max="99" value={playerForm.jersey_number} onChange={(e) => setPlayerForm((p) => ({ ...p, jersey_number: e.target.value }))} className={inputClass} placeholder="9" /></Field><Field label="Mevki"><select value={playerForm.position} onChange={(e) => setPlayerForm((p) => ({ ...p, position: e.target.value }))} className={inputClass}><option value="">Seçiniz</option><option value="Kaleci">Kaleci</option><option value="Defans">Defans</option><option value="Orta Saha">Orta Saha</option><option value="Kanat">Kanat</option><option value="Forvet">Forvet</option></select></Field><Field label="Gol"><input type="number" min="0" value={playerForm.goals} onChange={(e) => setPlayerForm((p) => ({ ...p, goals: e.target.value }))} className={inputClass} /></Field><Field label="Asist"><input type="number" min="0" value={playerForm.assists} onChange={(e) => setPlayerForm((p) => ({ ...p, assists: e.target.value }))} className={inputClass} /></Field></div><div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="mb-2 text-xs font-extrabold text-slate-500">Oyuncu fotoðrafý</p>{playerForm.photo_url && <img src={playerForm.photo_url} alt="Oyuncu" className="mb-3 h-28 w-28 rounded-2xl object-cover" />}<input type="file" accept="image/*" onChange={uploadPlayerPhoto} className="block w-full text-sm" />{uploadingPlayerPhoto && <p className="mt-2 text-xs font-bold text-blue-600">Fotoðraf yükleniyor...</p>}<p className="mt-2 text-[11px] text-slate-400">Ýstersen fotoðraf URL'sini de aþaðýdaki alana yapýþtýrabilirsin.</p><input value={playerForm.photo_url} onChange={(e) => setPlayerForm((p) => ({ ...p, photo_url: e.target.value }))} className={`${inputClass} mt-2`} placeholder="https://..." /></div><ModalButtons saving={saving} onCancel={() => setPlayerModal(false)} submitText={editingPlayer ? "Güncelle" : "Oyuncuyu Kaydet"} /></form></Modal>}
+    </main>
+  );
+}
+
+const inputClass = "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+
+function Empty({ text }: { text: string }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm"><p className="text-sm font-semibold text-slate-400">{text}</p></div>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><span className="mb-2 block text-xs font-extrabold text-slate-500">{label}</span>{children}</label>;
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4"><div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4"><h2 className="text-xl font-extrabold text-[#0f2747]">{title}</h2><button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500">?</button></div><div className="p-5 sm:p-6">{children}</div></div></div>;
+}
+
+function ModalButtons({ saving, onCancel, submitText }: { saving: boolean; onCancel: () => void; submitText: string }) {
+  return <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end"><button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600">Ýptal</button><button type="submit" disabled={saving} className="rounded-xl bg-[#0f2747] px-5 py-3 text-sm font-extrabold text-white disabled:opacity-50">{saving ? "Kaydediliyor..." : submitText}</button></div>;
+}
+
+function LogoUpload({ label, value, uploading, onChange }: { label: string; value: string; uploading: boolean; onChange: (event: React.ChangeEvent<HTMLInputElement>) => void }) {
+  return <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="mb-2 text-xs font-extrabold text-slate-500">{label}</p>{value && <img src={value} alt="Logo" className="mb-3 h-16 w-16 rounded-xl object-contain bg-white" />}<input type="file" accept="image/*" onChange={onChange} className="block w-full text-xs" />{uploading && <p className="mt-2 text-xs font-bold text-blue-600">Yükleniyor...</p>}</div>;
+}
+
+
+
+

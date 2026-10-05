@@ -1,0 +1,500 @@
+﻿      goals: String(player.goals ?? 0),
+      assists: String(player.assists ?? 0),
+      team: player.team || "",
+      photo_url: player.photo_url || "",
+    });
+    setPlayerModal(true);
+  };
+
+  const uploadPlayerPhoto = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      return showError("Lütfen bir görsel dosyası seç.");
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return showError(
+        "Oyuncu fotoğrafı en fazla 5 MB olabilir."
+      );
+    }
+
+    try {
+      setUploadingPlayerPhoto(true);
+
+      const extension =
+        file.name.split(".").pop()?.toLowerCase() || "jpg";
+
+      const path =
+        `players/${crypto.randomUUID()}.${extension}`;
+
+      console.log("FOTOĞRAF YÜKLENİYOR:", path);
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from("player-photos")
+          .upload(path, file, {
+            upsert: false,
+            contentType: file.type,
+          });
+
+      if (uploadError) {
+        console.error(
+          "FOTOĞRAF UPLOAD HATASI:",
+          uploadError
+        );
+
+        return showError(
+          "Fotoğraf yüklenemedi: " +
+            uploadError.message
+        );
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage
+        .from("player-photos")
+        .getPublicUrl(path);
+
+      if (!publicUrl) {
+        return showError(
+          "Fotoğraf URL'si oluşturulamadı."
+        );
+      }
+
+      console.log(
+        "FOTOĞRAF URL:",
+        publicUrl
+      );
+
+      /*
+       * Eğer mevcut oyuncu düzenleniyorsa,
+       * fotoğraf URL'sini doğrudan veritabanına yazıyoruz.
+       * Böylece React state'e bağlı kalmıyoruz.
+       */
+      if (editingPlayer) {
+        const { error: photoDbError } =
+          await supabase
+            .from("players")
+            .update({
+              photo_url: publicUrl,
+            })
+            .eq("id", editingPlayer.id);
+
+        if (photoDbError) {
+          console.error(
+            "PHOTO_URL DB HATASI:",
+            photoDbError
+          );
+
+          return showError(
+            "Fotoğraf yüklendi ancak oyuncuya kaydedilemedi: " +
+              photoDbError.message
+          );
+        }
+
+        console.log(
+          "PHOTO_URL VERİTABANINA KAYDEDİLDİ:",
+          publicUrl
+        );
+      }
+
+      setPlayerForm((prev) => ({
+        ...prev,
+        photo_url: publicUrl,
+      }));
+
+      showMessage(
+        editingPlayer
+          ? "Oyuncu fotoğrafı kaydedildi."
+          : "Oyuncu fotoğrafı yüklendi."
+      );
+    } catch (error) {
+      console.error(
+        "OYUNCU FOTOĞRAF HATASI:",
+        error
+      );
+
+      showError(
+        error instanceof Error
+          ? error.message
+          : "Oyuncu fotoğrafı yüklenemedi."
+      );
+    } finally {
+      setUploadingPlayerPhoto(false);
+    }
+  };
+  const savePlayer = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const name = playerForm.name.trim();
+    const goals = Number(playerForm.goals);
+    const assists = Number(playerForm.assists);
+
+    const jerseyNumber =
+      playerForm.jersey_number.trim() === ""
+        ? null
+        : Number(playerForm.jersey_number);
+
+    if (!name) {
+      return showError(
+        "Oyuncu adı zorunludur."
+      );
+    }
+
+    if (!Number.isInteger(goals) || goals < 0) {
+      return showError(
+        "Gol sayısı 0 veya daha büyük bir tam sayı olmalıdır."
+      );
+    }
+
+    if (!Number.isInteger(assists) || assists < 0) {
+      return showError(
+        "Asist sayısı 0 veya daha büyük bir tam sayı olmalıdır."
+      );
+    }
+
+    if (
+      jerseyNumber !== null &&
+      (
+        !Number.isInteger(jerseyNumber) ||
+        jerseyNumber < 0 ||
+        jerseyNumber > 99
+      )
+    ) {
+      return showError(
+        "Forma numarası 0-99 arasında olmalıdır."
+      );
+    }
+
+    setSaving(true);
+
+    const photoUrl =
+      playerForm.photo_url.trim();
+
+    const payload = {
+      name,
+      photo_url: photoUrl || null,
+      jersey_number: jerseyNumber,
+      position:
+        playerForm.position.trim() || null,
+      goals,
+      assists,
+      team:
+        playerForm.team.trim() || null,
+    };
+
+    console.log(
+      "OYUNCU KAYIT PAYLOAD:",
+      payload
+    );
+
+    const result = editingPlayer
+      ? await supabase
+          .from("players")
+          .update(payload)
+          .eq("id", editingPlayer.id)
+      : await supabase
+          .from("players")
+          .insert(payload);
+
+    setSaving(false);
+
+    if (result.error) {
+      console.error(
+        "OYUNCU KAYIT HATASI:",
+        result.error
+      );
+
+      return showError(
+        "Oyuncu kaydedilemedi: " +
+          result.error.message
+      );
+    }
+
+    console.log(
+      "OYUNCU KAYDEDİLDİ:",
+      payload
+    );
+
+    setPlayerModal(false);
+
+    await loadPlayers();
+
+    showMessage(
+      editingPlayer
+        ? "Oyuncu güncellendi."
+        : "Oyuncu başarıyla eklendi."
+    );
+  };
+  const deletePlayer = async (player: Player) => {
+    if (!window.confirm(`${player.name} oyuncusunu silmek istediğine emin misin?`)) return;
+    const { error } = await supabase.from("players").delete().eq("id", player.id);
+    if (error) return showError("Oyuncu silinemedi: " + error.message);
+    await loadPlayers();
+    showMessage("Oyuncu silindi.");
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut({
+      scope: "local",
+    });
+
+    window.location.replace("/login");
+  };
+
+  const formatDate = (value: string | null) => {
+    if (!value) return "-";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "-";
+    }
+
+    return new Intl.DateTimeFormat("tr-TR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  };
+
+  const stats = useMemo(() => {
+    const finished = matches.filter(
+      (match) => match.status === "finished"
+    ).length;
+
+    const scheduled = matches.filter(
+      (match) =>
+        match.status !== "finished" &&
+        match.status !== "cancelled"
+    ).length;
+
+    const totalCodeUses = bonusCodes.reduce(
+      (sum, code) =>
+        sum + Number(code.usage_count || 0),
+      0
+    );
+
+    return {
+      totalMatches: matches.length,
+      finished,
+      scheduled,
+      users: users.length,
+      bonusQuestions: bonusQuestions.length,
+      totalCodes: bonusCodes.length,
+      totalCodeUses,
+      players: players.length,
+    };
+  }, [
+    matches,
+    users,
+    bonusQuestions,
+    bonusCodes,
+    players,
+  ]);
+
+  /* =========================================================
+     LOADING
+  ========================================================= */
+
+  if (loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb]">
+        <div className="text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#0f2747] text-3xl">
+            ⚙️
+          </div>
+
+          <p className="mt-4 text-sm font-bold text-slate-500">
+            Admin paneli yükleniyor...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!authorized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb] p-5">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 text-3xl">
+            🔒
+          </div>
+
+          <h1 className="mt-5 text-2xl font-extrabold text-[#0f2747]">
+            Yetkisiz Erişim
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Bu sayfayı görüntülemek için admin yetkisine sahip
+            olmalısın.
+          </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              (window.location.href = "/")
+            }
+            className="mt-6 w-full rounded-xl bg-[#0f2747] px-5 py-3.5 text-sm font-bold text-white"
+          >
+            Ana Sayfaya Dön
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f4f7fb] text-slate-900">
+      {/* HEADER */}
+
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                (window.location.href = "/")
+              }
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f2747] text-lg"
+            >
+              ⚽
+            </button>
+
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-extrabold tracking-tight text-[#0f2747] sm:text-xl">
+                Admin Paneli
+              </h1>
+
+              <p className="text-[9px] font-bold uppercase tracking-widest text-blue-600">
+                Futbol Tahmin Yönetimi
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                (window.location.href = "/")
+              }
+              className="hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 sm:block"
+            >
+              ← Ana Sayfa
+            </button>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-xl bg-red-600 px-4 py-2.5 text-xs font-bold text-white sm:text-sm"
+            >
+              Çıkış
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
+        {message && (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+            ✓ {message}
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* İSTATİSTİKLER */}
+
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Maç
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-[#0f2747]">
+              {stats.totalMatches}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Planlanan
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-blue-600">
+              {stats.scheduled}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Tamamlanan
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-emerald-600">
+              {stats.finished}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Kullanıcı
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-[#0f2747]">
+              {stats.users}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Bonus Soru
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-purple-600">
+              {stats.bonusQuestions}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Bonus Kod
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-orange-600">
+              {stats.totalCodes}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              Kod Kullanımı
+            </p>
+            <p className="mt-2 text-2xl font-extrabold text-pink-600">
+              {stats.totalCodeUses}
+            </p>
+          </div>
+        </section>
+
+        {/* MENÜ */}
+
+        <div className="mt-6 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            ["matches", "⚽ Maçlar"],
+            ["bonus", "🎯 Bonus Soruları"],
+    ["surveys", "📊 Anketler"],
+            ["users", "👥 Kullanıcılar"],
+            ["codes", "🎁 Bonus Kodları"],
+    ["players", "👤 Oyuncular"],
+            ["wheel", "🎡 Çark"],
+            ["activity", "📋 Kullanıcı Hareketleri"],
+            ["predictions", "🎯 Kullanıcı Tahminleri"],
+            ["userBonus", "🎁 Kullanıcı Bonus"],
+            ["userSurveys", "📊 Kullanıcı Anket"],
+            ["userWheel", "🎡 Kullanıcı Çark"],
+            ["userCodes", "🔑 Kod Kullanımları"],

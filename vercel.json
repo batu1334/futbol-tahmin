@@ -1,1 +1,8 @@
-{"framework":"nextjs"}
+{
+  "crons": [
+    {
+      "path": "/api/automation/",
+      "schedule": "0 21 * * *"
+    }
+  ]
+}

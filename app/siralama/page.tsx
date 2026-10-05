@@ -1,796 +1,390 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 type Player = {
-  rank: number;
-  user_id: string;
+  id: string;
   display_name: string;
-  total_points: number;
-  prediction_count: number;
+  score: number;
+  predictions: number;
+  polls: number;
 };
 
-type SortMode = "rank" | "points" | "predictions";
-
-export default function SiralamaPage() {
+export default function RankingPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [myUserId, setMyUserId] = useState("");
-  const [search, setSearch] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("rank");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    loadLeaderboard();
+    loadRanking();
   }, []);
 
-  async function loadLeaderboard(showRefresh = false) {
-    if (showRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
+  const loadRanking = async () => {
+    setLoading(true);
+    setError("");
 
-    const userResult = await supabase.auth.getUser();
+    const { data, error } = await supabase.rpc("get_leaderboard");
 
-    if (!userResult.data.user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const currentUserId = userResult.data.user.id;
-
-    setMyUserId(currentUserId);
-
-    const result = await supabase.rpc("get_leaderboard");
-
-    if (result.error) {
-      console.error("Leaderboard error:", result.error);
-
-      setPlayers([]);
-
+    if (error) {
+      console.error("Leaderboard error:", error);
+      setError("Sıralama yüklenemedi: " + error.message);
       setLoading(false);
-      setRefreshing(false);
-
       return;
     }
 
-    setPlayers((result.data || []) as Player[]);
+    const ranking: Player[] = (data || []).map(
+      (user: {
+        id: string;
+        display_name: string | null;
+        score: number | string | null;
+        predictions: number | string | null;
+        polls: number | string | null;
+      }) => ({
+        id: user.id,
+        display_name: user.display_name || "Oyuncu",
+        score: Number(user.score) || 0,
+        predictions: Number(user.predictions) || 0,
+        polls: Number(user.polls) || 0,
+      })
+    );
 
+    setPlayers(ranking);
     setLoading(false);
-    setRefreshing(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#070b18] flex items-center justify-center text-white">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 rounded-full border-4 border-cyan-400/20 border-t-cyan-400 animate-spin" />
+
+          <p className="font-black text-lg">
+            Sıralama yükleniyor...
+          </p>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Puanlar hesaplanıyor
+          </p>
+        </div>
+      </div>
+    );
   }
 
-  const myPlayer = useMemo(
-    () =>
-      players.find(
-        (player) => player.user_id === myUserId
-      ),
-    [players, myUserId]
-  );
+  if (error) {
+    return (
+      <main className="min-h-screen bg-[#070b18] text-white px-4 py-10">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-3xl border border-red-400/20 bg-red-500/10 p-6">
+            <h1 className="text-xl font-black">
+              Sıralama yüklenemedi
+            </h1>
 
-  const filteredPlayers = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase("tr-TR");
-
-    let result = [...players];
-
-    if (query) {
-      result = result.filter((player) =>
-        player.display_name
-          .toLocaleLowerCase("tr-TR")
-          .includes(query)
-      );
-    }
-
-    if (sortMode === "points") {
-      result.sort((a, b) => {
-        if (b.total_points !== a.total_points) {
-          return b.total_points - a.total_points;
-        }
-
-        return a.rank - b.rank;
-      });
-    }
-
-    if (sortMode === "predictions") {
-      result.sort((a, b) => {
-        if (
-          b.prediction_count !==
-          a.prediction_count
-        ) {
-          return (
-            b.prediction_count -
-            a.prediction_count
-          );
-        }
-
-        return a.rank - b.rank;
-      });
-    }
-
-    if (sortMode === "rank") {
-      result.sort((a, b) => a.rank - b.rank);
-    }
-
-    return result;
-  }, [players, search, sortMode]);
-
-  const topThree = useMemo(() => {
-    return {
-      first: players.find(
-        (player) => player.rank === 1
-      ),
-      second: players.find(
-        (player) => player.rank === 2
-      ),
-      third: players.find(
-        (player) => player.rank === 3
-      ),
-    };
-  }, [players]);
-
-  const totalPredictions = useMemo(
-    () =>
-      players.reduce(
-        (sum, player) =>
-          sum + (player.prediction_count || 0),
-        0
-      ),
-    [players]
-  );
-
-  const averagePoints =
-    players.length > 0
-      ? Math.round(
-          players.reduce(
-            (sum, player) =>
-              sum + (player.total_points || 0),
-            0
-          ) / players.length
-        )
-      : 0;
-
-  return (
-    <main
-      className="min-h-screen bg-[#f4f7fb] text-slate-900"
-      style={{
-        fontFamily:
-          'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      }}
-    >
-      <style jsx>{`
-        * {
-          box-sizing: border-box;
-        }
-
-        button {
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        .title {
-          letter-spacing: -0.04em;
-        }
-
-        .card-shadow {
-          box-shadow:
-            0 2px 8px rgba(15, 39, 71, 0.04),
-            0 12px 35px rgba(15, 39, 71, 0.06);
-        }
-
-        .hero-shadow {
-          box-shadow:
-            0 18px 50px rgba(15, 39, 71, 0.16);
-        }
-
-        .player-row {
-          transition:
-            background-color 0.15s ease,
-            transform 0.15s ease;
-        }
-
-        .player-row:hover {
-          background: #f8fafc;
-        }
-      `}</style>
-
-      {/* HEADER */}
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = "/";
-            }}
-            className="flex min-w-0 items-center gap-3"
-          >
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#0f2747] text-xl shadow-lg">
-              ⚽
-            </div>
-
-            <div className="min-w-0 text-left">
-              <p className="text-[9px] font-black uppercase tracking-[0.25em] text-blue-600">
-                FOOTBALL
-              </p>
-
-              <p className="title truncate text-lg font-black text-[#0f2747] sm:text-xl">
-                TAHMİN
-              </p>
-            </div>
-          </button>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => loadLeaderboard(true)}
-              disabled={refreshing}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-lg text-slate-600 transition hover:border-blue-200 hover:text-blue-600 disabled:opacity-50"
-              title="Yenile"
-            >
-              {refreshing ? "⏳" : "↻"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                window.location.href = "/";
-              }}
-              className="rounded-xl bg-[#0f2747] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#16355e] sm:text-sm"
-            >
-              ← Ana Sayfa
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
-        {/* HERO */}
-        <section className="hero-shadow overflow-hidden rounded-2xl bg-[#0f2747] sm:rounded-3xl">
-          <div className="relative px-5 py-7 sm:px-8 sm:py-9 lg:px-10">
-            <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
-
-            <div className="relative">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3.5 py-2 text-[10px] font-bold uppercase tracking-wider text-blue-200">
-                🏆 Liderlik Tablosu
-              </div>
-
-              <h1 className="title mt-4 text-3xl font-extrabold text-white sm:text-4xl lg:text-5xl">
-                Puan Sıralaması
-              </h1>
-
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Tahminlerden kazandığın puanlarla diğer
-                oyuncularla sıralamadaki yerini takip et.
-              </p>
-
-              <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <div className="rounded-xl border border-white/10 bg-white/10 px-4 py-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">
-                    Oyuncu
-                  </p>
-
-                  <p className="mt-1 text-xl font-extrabold text-white">
-                    {players.length}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/10 px-4 py-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">
-                    Toplam Tahmin
-                  </p>
-
-                  <p className="mt-1 text-xl font-extrabold text-white">
-                    {totalPredictions}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/10 px-4 py-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">
-                    Ortalama Puan
-                  </p>
-
-                  <p className="mt-1 text-xl font-extrabold text-white">
-                    {averagePoints}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-blue-400/20 bg-blue-500/20 px-4 py-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-blue-200">
-                    Senin Puanın
-                  </p>
-
-                  <p className="mt-1 text-xl font-extrabold text-white">
-                    {myPlayer?.total_points ?? 0}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {loading ? (
-          <section className="mt-6 space-y-4">
-            <div className="h-72 animate-pulse rounded-3xl bg-white shadow-sm" />
-
-            <div className="h-20 animate-pulse rounded-2xl bg-white shadow-sm" />
-
-            <div className="h-20 animate-pulse rounded-2xl bg-white shadow-sm" />
-
-            <div className="h-20 animate-pulse rounded-2xl bg-white shadow-sm" />
-          </section>
-        ) : players.length === 0 ? (
-          <section className="card-shadow mt-6 rounded-3xl border border-slate-200 bg-white p-12 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
-              🏆
-            </div>
-
-            <h2 className="mt-5 text-xl font-black text-[#0f2747]">
-              Henüz sıralama yok
-            </h2>
-
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
-              İlk tahminleri yaparak puan kazanmaya
-              başlayabilirsin.
+            <p className="mt-2 text-sm text-red-200">
+              {error}
             </p>
 
             <button
-              type="button"
-              onClick={() => {
-                window.location.href = "/tahmin";
-              }}
-              className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700"
+              onClick={loadRanking}
+              className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-900 transition hover:scale-[1.02]"
             >
-              🎯 Tahmin Yap
+              Tekrar Dene
             </button>
-          </section>
-        ) : (
-          <>
-            {/* TOP 3 */}
-            <section className="mt-7 sm:mt-9">
-              <div className="mb-5">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600">
-                  Zirve
-                </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-                <h2 className="title mt-1 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
-                  Liderler
-                </h2>
+  return (
+    <main className="min-h-screen bg-[#070b18] text-white px-4 py-8 sm:py-10">
+      <div className="mx-auto max-w-5xl">
 
-                <p className="mt-1 text-sm text-slate-500">
-                  En yüksek puana sahip oyuncular
-                </p>
-              </div>
+        {/* HEADER */}
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#111a38] via-[#0d1530] to-[#070b18] p-6 sm:p-8 shadow-2xl">
 
-              <div className="grid items-end gap-3 md:grid-cols-3 md:gap-5">
-                {/* SECOND */}
-                {topThree.second && (
-                  <div
-                    className={`order-2 rounded-2xl border bg-white p-5 text-center card-shadow md:order-1 md:mb-5 ${
-                      topThree.second.user_id === myUserId
-                        ? "border-blue-300 ring-4 ring-blue-50"
-                        : "border-slate-200"
-                    }`}
-                  >
-                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-3xl">
-                      🥈
-                    </div>
+          <div className="absolute -right-20 -top-20 h-52 w-52 rounded-full bg-cyan-500/10 blur-3xl" />
 
-                    <p className="mt-4 truncate text-lg font-extrabold text-[#0f2747]">
-                      {topThree.second.display_name}
-                    </p>
+          <div className="absolute -left-20 -bottom-20 h-52 w-52 rounded-full bg-violet-500/10 blur-3xl" />
 
-                    {topThree.second.user_id === myUserId && (
-                      <span className="mt-2 inline-flex rounded-full bg-blue-50 px-3 py-1 text-[9px] font-extrabold text-blue-600">
-                        SEN
-                      </span>
-                    )}
+          <div className="relative">
 
-                    <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                      <p className="text-3xl font-extrabold text-[#0f2747]">
-                        {topThree.second.total_points}
-                      </p>
+            <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/20 bg-yellow-400/10 px-3 py-1.5 text-xs font-black text-yellow-300">
+              🏆 LİDERLİK TABLOSU
+            </div>
 
-                      <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        Puan
-                      </p>
-                    </div>
+            <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">
+              Liderlik Tablosu
+            </h1>
 
-                    <p className="mt-3 text-xs font-semibold text-slate-400">
-                      🎯 {topThree.second.prediction_count} tahmin
-                    </p>
-                  </div>
-                )}
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400 sm:text-base">
+              Tüm oyuncuların toplam puanlarına göre güncel sıralaması.
+            </p>
 
-                {/* FIRST */}
-                {topThree.first && (
-                  <div
-                    className={`order-1 rounded-3xl border bg-white p-6 text-center card-shadow md:order-2 ${
-                      topThree.first.user_id === myUserId
-                        ? "border-blue-300 ring-4 ring-blue-50"
-                        : "border-blue-100"
-                    }`}
-                  >
-                    <div className="relative mx-auto w-fit">
-                      <div className="absolute -right-4 -top-4 text-xl">
-                        ✨
-                      </div>
+            <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-cyan-400/10 bg-cyan-400/5 px-4 py-2 text-xs font-bold text-cyan-300">
+              ⚡ Toplam puana göre sıralanır
+            </div>
 
-                      <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-yellow-300 to-yellow-500 text-5xl shadow-lg">
-                        👑
-                      </div>
-                    </div>
+          </div>
+        </div>
 
-                    <p className="mt-5 truncate text-2xl font-extrabold text-[#0f2747]">
-                      {topThree.first.display_name}
-                    </p>
 
-                    {topThree.first.user_id === myUserId && (
-                      <span className="mt-2 inline-flex rounded-full bg-blue-600 px-3 py-1 text-[9px] font-extrabold text-white">
-                        SEN
-                      </span>
-                    )}
+        {/* EMPTY */}
+        {players.length === 0 && (
+          <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-10 text-center">
+            <div className="text-5xl">🏆</div>
 
-                    <div className="mt-5 rounded-2xl bg-[#0f2747] p-5 text-white">
-                      <p className="text-4xl font-extrabold">
-                        {topThree.first.total_points}
-                      </p>
+            <h2 className="mt-4 text-xl font-black">
+              Henüz oyuncu yok
+            </h2>
 
-                      <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-blue-200">
-                        Toplam Puan
-                      </p>
-                    </div>
-
-                    <p className="mt-4 text-xs font-semibold text-slate-400">
-                      🎯 {topThree.first.prediction_count} tahmin
-                    </p>
-
-                    <div className="mt-4 inline-flex rounded-full bg-yellow-50 px-4 py-2 text-[10px] font-extrabold text-yellow-600">
-                      🥇 1. SIRA
-                    </div>
-                  </div>
-                )}
-
-                {/* THIRD */}
-                {topThree.third && (
-                  <div
-                    className={`order-3 rounded-2xl border bg-white p-5 text-center card-shadow ${
-                      topThree.third.user_id === myUserId
-                        ? "border-blue-300 ring-4 ring-blue-50"
-                        : "border-slate-200"
-                    }`}
-                  >
-                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-orange-50 text-3xl">
-                      🥉
-                    </div>
-
-                    <p className="mt-4 truncate text-lg font-extrabold text-[#0f2747]">
-                      {topThree.third.display_name}
-                    </p>
-
-                    {topThree.third.user_id === myUserId && (
-                      <span className="mt-2 inline-flex rounded-full bg-blue-50 px-3 py-1 text-[9px] font-extrabold text-blue-600">
-                        SEN
-                      </span>
-                    )}
-
-                    <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                      <p className="text-3xl font-extrabold text-[#0f2747]">
-                        {topThree.third.total_points}
-                      </p>
-
-                      <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        Puan
-                      </p>
-                    </div>
-
-                    <p className="mt-3 text-xs font-semibold text-slate-400">
-                      🎯 {topThree.third.prediction_count} tahmin
-                    </p>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* MY POSITION */}
-            {myPlayer && (
-              <section className="mt-7">
-                <div className="overflow-hidden rounded-2xl border border-blue-200 bg-white card-shadow">
-                  <div className="bg-blue-600 px-4 py-2.5">
-                    <p className="text-[9px] font-extrabold uppercase tracking-widest text-white">
-                      Senin Durumun
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-4 p-5">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0f2747] text-lg font-extrabold text-white">
-                        {myPlayer.rank}
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="truncate text-lg font-extrabold text-[#0f2747]">
-                          {myPlayer.display_name}
-                        </p>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          🎯 {myPlayer.prediction_count} tahmin
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <p className="text-3xl font-extrabold text-blue-600">
-                        {myPlayer.total_points}
-                      </p>
-
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                        toplam puan
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            )}
-
-            {/* PLAYER LIST */}
-            <section className="mt-8">
-              <div className="mb-5">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600">
-                  Sıralama
-                </p>
-
-                <h2 className="title mt-1 text-2xl font-extrabold text-[#0f2747] sm:text-3xl">
-                  Tüm Oyuncular
-                </h2>
-              </div>
-
-              {/* SEARCH + SORT */}
-              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row">
-                <div className="relative min-w-0 flex-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                    🔎
-                  </span>
-
-                  <input
-                    value={search}
-                    onChange={(event) =>
-                      setSearch(event.target.value)
-                    }
-                    placeholder="Oyuncu ara..."
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-medium outline-none transition focus:border-blue-400 focus:bg-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setSortMode("rank")}
-                    className={`rounded-lg px-3 py-2 text-[10px] font-extrabold transition sm:text-xs ${
-                      sortMode === "rank"
-                        ? "bg-[#0f2747] text-white shadow-sm"
-                        : "text-slate-500"
-                    }`}
-                  >
-                    Sıra
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSortMode("points")}
-                    className={`rounded-lg px-3 py-2 text-[10px] font-extrabold transition sm:text-xs ${
-                      sortMode === "points"
-                        ? "bg-[#0f2747] text-white shadow-sm"
-                        : "text-slate-500"
-                    }`}
-                  >
-                    Puan
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSortMode("predictions")
-                    }
-                    className={`rounded-lg px-3 py-2 text-[10px] font-extrabold transition sm:text-xs ${
-                      sortMode === "predictions"
-                        ? "bg-[#0f2747] text-white shadow-sm"
-                        : "text-slate-500"
-                    }`}
-                  >
-                    Tahmin
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white card-shadow">
-                {/* DESKTOP HEADER */}
-                <div className="hidden grid-cols-[80px_1fr_150px_150px] gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 text-[9px] font-extrabold uppercase tracking-wider text-slate-400 md:grid">
-                  <div>Sıra</div>
-
-                  <div>Oyuncu</div>
-
-                  <div className="text-center">
-                    Tahmin
-                  </div>
-
-                  <div className="text-right">
-                    Puan
-                  </div>
-                </div>
-
-                {filteredPlayers.length === 0 ? (
-                  <div className="p-10 text-center">
-                    <div className="text-3xl">
-                      🔎
-                    </div>
-
-                    <p className="mt-3 text-sm font-bold text-slate-500">
-                      Oyuncu bulunamadı.
-                    </p>
-                  </div>
-                ) : (
-                  filteredPlayers.map((player) => {
-                    const isMe =
-                      player.user_id === myUserId;
-
-                    const isTopThree =
-                      player.rank <= 3;
-
-                    return (
-                      <div
-                        key={player.user_id}
-                        className={`player-row grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 px-3 py-4 last:border-b-0 md:grid-cols-[80px_1fr_150px_150px] md:gap-4 md:px-5 ${
-                          isMe
-                            ? "bg-blue-50/80"
-                            : "bg-white"
-                        }`}
-                      >
-                        {/* RANK */}
-                        <div>
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-extrabold ${
-                              player.rank === 1
-                                ? "bg-yellow-100 text-yellow-700"
-                                : player.rank === 2
-                                  ? "bg-slate-200 text-slate-600"
-                                  : player.rank === 3
-                                    ? "bg-orange-100 text-orange-700"
-                                    : isMe
-                                      ? "bg-blue-600 text-white"
-                                      : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {player.rank === 1
-                              ? "🥇"
-                              : player.rank === 2
-                                ? "🥈"
-                                : player.rank === 3
-                                  ? "🥉"
-                                  : player.rank}
-                          </div>
-                        </div>
-
-                        {/* PLAYER */}
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <p
-                              className={`truncate text-sm font-extrabold ${
-                                isMe
-                                  ? "text-blue-700"
-                                  : "text-[#0f2747]"
-                              }`}
-                            >
-                              {player.display_name}
-                            </p>
-
-                            {isMe && (
-                              <span className="shrink-0 rounded-full bg-blue-600 px-2 py-1 text-[8px] font-extrabold text-white">
-                                SEN
-                              </span>
-                            )}
-                          </div>
-
-                          <p className="mt-1 text-[10px] text-slate-400 md:hidden">
-                            🎯 {player.prediction_count} tahmin
-                          </p>
-                        </div>
-
-                        {/* PREDICTIONS */}
-                        <div className="hidden text-center md:block">
-                          <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-bold text-slate-500">
-                            🎯 {player.prediction_count}
-                          </span>
-                        </div>
-
-                        {/* POINTS */}
-                        <div className="text-right">
-                          <p
-                            className={`text-xl font-extrabold ${
-                              isMe
-                                ? "text-blue-600"
-                                : "text-[#0f2747]"
-                            }`}
-                          >
-                            {player.total_points}
-                          </p>
-
-                          <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
-                            puan
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </section>
-
-            {/* SCORING INFO */}
-            <section className="mt-7">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 card-shadow">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xl">
-                    🎯
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-extrabold text-[#0f2747]">
-                      Puanlama Sistemi
-                    </h3>
-
-                    <p className="mt-1 text-xs leading-5 text-slate-400">
-                      Maç tahminlerinde skor doğruluğuna göre
-                      puan kazanırsın.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-5 grid grid-cols-3 gap-2">
-                  <div className="rounded-xl bg-emerald-50 p-3 text-center">
-                    <p className="text-xl font-extrabold text-emerald-600">
-                      20
-                    </p>
-
-                    <p className="mt-1 text-[9px] font-bold text-emerald-700">
-                      TAM SKOR
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-blue-50 p-3 text-center">
-                    <p className="text-xl font-extrabold text-blue-600">
-                      10
-                    </p>
-
-                    <p className="mt-1 text-[9px] font-bold text-blue-700">
-                      1 FARK
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-amber-50 p-3 text-center">
-                    <p className="text-xl font-extrabold text-amber-600">
-                      5
-                    </p>
-
-                    <p className="mt-1 text-[9px] font-bold text-amber-700">
-                      2 FARK
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </>
+            <p className="mt-2 text-sm text-slate-400">
+              İlk oyuncular puan kazandığında burada görünecek.
+            </p>
+          </div>
         )}
 
-        {/* FOOTER */}
-        <footer className="py-8 text-center">
-          <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-            ⚽ Futbol Tahmin
-          </p>
 
-          <p className="mt-1 text-[10px] text-slate-400">
-            Tahmin et • Puan kazan • Sıralamada yüksel
-          </p>
-        </footer>
+        {/* TOP 3 */}
+        {players.length > 0 && (
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+
+            {/* 1 */}
+            {players[0] && (
+              <div className="relative overflow-hidden rounded-3xl border border-yellow-400/30 bg-gradient-to-br from-yellow-400/20 via-orange-500/10 to-white/5 p-5 shadow-xl sm:order-2">
+
+                <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-yellow-400/10 blur-2xl" />
+
+                <div className="relative text-center">
+
+                  <div className="text-4xl">
+                    🥇
+                  </div>
+
+                  <div className="mt-3 truncate text-lg font-black">
+                    {players[0].display_name}
+                  </div>
+
+                  <div className="mt-2 text-3xl font-black text-yellow-300">
+                    {players[0].score}
+                  </div>
+
+                  <div className="text-xs font-bold text-yellow-200/60">
+                    PUAN
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+
+            {/* 2 */}
+            {players[1] && (
+              <div className="relative overflow-hidden rounded-3xl border border-slate-400/20 bg-white/5 p-5 sm:order-1">
+
+                <div className="text-center">
+
+                  <div className="text-4xl">
+                    🥈
+                  </div>
+
+                  <div className="mt-3 truncate text-lg font-black">
+                    {players[1].display_name}
+                  </div>
+
+                  <div className="mt-2 text-3xl font-black text-slate-200">
+                    {players[1].score}
+                  </div>
+
+                  <div className="text-xs font-bold text-slate-500">
+                    PUAN
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+
+            {/* 3 */}
+            {players[2] && (
+              <div className="relative overflow-hidden rounded-3xl border border-orange-400/20 bg-white/5 p-5 sm:order-3">
+
+                <div className="text-center">
+
+                  <div className="text-4xl">
+                    🥉
+                  </div>
+
+                  <div className="mt-3 truncate text-lg font-black">
+                    {players[2].display_name}
+                  </div>
+
+                  <div className="mt-2 text-3xl font-black text-orange-300">
+                    {players[2].score}
+                  </div>
+
+                  <div className="text-xs font-bold text-orange-200/50">
+                    PUAN
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
+
+
+        {/* ALL PLAYERS */}
+        {players.length > 0 && (
+          <div className="mt-8">
+
+            <div className="mb-4 flex items-center justify-between">
+
+              <div>
+                <h2 className="text-xl font-black">
+                  Tüm Oyuncular
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  {players.length} oyuncu
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-slate-400">
+                TOPLAM PUAN
+              </div>
+
+            </div>
+
+
+            <div className="space-y-3">
+
+              {players.map((player, index) => {
+
+                const isFirst = index === 0;
+                const isSecond = index === 1;
+                const isThird = index === 2;
+
+                return (
+                  <div
+                    key={player.id}
+                    className={`
+                      group
+                      relative
+                      overflow-hidden
+                      rounded-2xl
+                      border
+                      p-4
+                      sm:p-5
+                      transition-all
+                      duration-200
+                      hover:-translate-y-0.5
+                      hover:bg-white/[0.07]
+
+                      ${
+                        isFirst
+                          ? "border-yellow-400/30 bg-gradient-to-r from-yellow-400/10 to-orange-500/5"
+                          : isSecond
+                            ? "border-slate-400/20 bg-white/[0.045]"
+                            : isThird
+                              ? "border-orange-400/20 bg-white/[0.045]"
+                              : "border-white/10 bg-white/[0.035]"
+                      }
+                    `}
+                  >
+
+                    <div className="flex items-center gap-3 sm:gap-4">
+
+                      {/* POSITION */}
+                      <div
+                        className={`
+                          flex
+                          h-11
+                          w-11
+                          shrink-0
+                          items-center
+                          justify-center
+                          rounded-xl
+                          text-sm
+                          font-black
+
+                          ${
+                            isFirst
+                              ? "bg-gradient-to-br from-yellow-300 to-orange-500 text-black"
+                              : isSecond
+                                ? "bg-gradient-to-br from-slate-200 to-slate-500 text-black"
+                                : isThird
+                                  ? "bg-gradient-to-br from-orange-300 to-orange-600 text-black"
+                                  : "bg-gradient-to-br from-cyan-400 to-violet-500 text-white"
+                          }
+                        `}
+                      >
+                        {index + 1}
+                      </div>
+
+
+                      {/* PLAYER */}
+                      <div className="min-w-0 flex-1">
+
+                        <h3 className="truncate text-base font-black sm:text-lg">
+                          {player.display_name}
+                        </h3>
+
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-bold text-slate-500 sm:text-xs">
+
+                          <span>
+                            🎯 {player.predictions} tahmin
+                          </span>
+
+                          <span className="hidden text-slate-700 sm:inline">
+                            •
+                          </span>
+
+                          <span>
+                            🔥 {player.polls} anket
+                          </span>
+
+                        </div>
+
+                      </div>
+
+
+                      {/* SCORE */}
+                      <div className="shrink-0 text-right">
+
+                        <div
+                          className={`
+                            text-2xl
+                            font-black
+                            sm:text-3xl
+
+                            ${
+                              isFirst
+                                ? "text-yellow-300"
+                                : "text-cyan-300"
+                            }
+                          `}
+                        >
+                          {player.score}
+                        </div>
+
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          puan
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+                );
+              })}
+
+            </div>
+          </div>
+        )}
+
       </div>
     </main>
   );

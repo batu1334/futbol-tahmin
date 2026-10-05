@@ -1,0 +1,500 @@
+﻿    setBonusCodes((data || []) as BonusCode[]);
+  };
+
+  const loadPlayers = async () => {
+    const { data, error } = await supabase
+      .from("players")
+      .select("id,name,photo_url,created_at,jersey_number,position,goals,assists,team")
+      .order("name", { ascending: true });
+    if (error) {
+      console.error(error);
+      showError("Oyuncular yüklenemedi: " + error.message);
+      return;
+    }
+    setPlayers((data || []) as Player[]);
+  };
+
+  const loadUserActivities = async () => {
+    setActivityLoading(true);
+    try {
+      const [pred, bonus, survey, wheel, codes] = await Promise.all([
+        supabase.from("Predictions").select("*").order("created_at", { ascending: false }).limit(500),
+        supabase.from("BonusAnswers").select("*").order("created_at", { ascending: false }).limit(500),
+        supabase.from("PollAnswers").select("*").order("created_at", { ascending: false }).limit(500),
+        supabase.from("reward_wheel_spins").select("*").order("created_at", { ascending: false }).limit(500),
+        supabase.from("bonus_code_redemptions").select("*").order("created_at", { ascending: false }).limit(500),
+      ]);
+
+      const rows: UserActivity[] = [];
+      const add = (data: any[] | null, type: UserActivity["type"], title: string, detailFn: (r: any) => string, pointsFn: (r: any) => number | null) => {
+        (data || []).forEach((r, i) => {
+          if (!r.user_id) return;
+          rows.push({ id: `${type}-${r.id ?? i}-${r.user_id}`, record_id: r.id ?? i, user_id: String(r.user_id), type, title, detail: detailFn(r), points: pointsFn(r), created_at: r.created_at || r.updated_at || new Date().toISOString() });
+        });
+      };
+
+      add(pred.data as any[], "prediction", "⚽ Maç tahmini", (r) => `Maç #${r.match_id} • Tahmin: ${r.home_score ?? "-"} - ${r.away_score ?? "-"}`, (r) => r.points == null ? null : Number(r.points));
+      add(bonus.data as any[], "bonus", "🎯 Bonus soru", (r) => `Soru #${r.question_id ?? "-"} • Cevap: ${r.answer ?? r.selected_answer ?? "-"}`, (r) => r.points == null ? null : Number(r.points));
+      add(survey.data as any[], "survey", "📊 Anket", (r) => `Anket #${r.question_id ?? "-"} • Cevap: ${r.answer ?? "-"}`, (r) => r.points == null ? null : Number(r.points));
+      add(wheel.data as any[], "wheel", "🎡 Çark çevirme", (r) => `Dilim: ${r.slot ?? r.result ?? "-"}`, (r) => r.points == null ? null : Number(r.points));
+      add(codes.data as any[], "code", "🔑 Bonus kodu", (r) => `Kod: ${r.code ?? r.bonus_code ?? r.code_id ?? "-"}`, (r) => r.points == null ? null : Number(r.points));
+
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setActivities(rows);
+      [pred, bonus, survey, wheel, codes].forEach((x) => { if (x.error) console.error("Aktivite sorgusu:", x.error); });
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const checkAdmin = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      window.location.replace("/login");
+      return;
+    }
+
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error || !profile?.is_admin) {
+      setAuthorized(false);
+      setLoading(false);
+      return;
+    }
+
+    setAuthorized(true);
+
+    await Promise.all([
+      loadMatches(),
+      loadBonusQuestions(),
+      loadSurveys(),
+      loadUsers(),
+      loadBonusCodes(),
+      loadPlayers(),
+      loadWheelOptions(),
+      loadManualPoints(),
+      loadRankingPoints(),
+      loadUserActivities(),
+    ]);
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    checkAdmin();
+  }, []);
+
+  useEffect(() => {
+    if (!authorized) return;
+
+    const channel = supabase
+      .channel("admin-panel-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "Matches",
+        },
+        () => {
+          loadMatches();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "BonusQuestions",
+        },
+        () => {
+          loadBonusQuestions();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bonus_codes",
+        },
+        () => {
+          loadBonusCodes();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bonus_code_redemptions" },
+        () => { loadBonusCodes(); loadUserActivities(); loadRankingPoints(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "Predictions" },
+        () => { loadUserActivities(); loadRankingPoints(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "BonusAnswers" },
+        () => { loadUserActivities(); loadRankingPoints(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "PollAnswers" },
+        () => { loadUserActivities(); loadRankingPoints(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "reward_wheel_spins" },
+        () => { loadUserActivities(); loadRankingPoints(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "admin_point_adjustments" },
+        () => { loadRankingPoints(); }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authorized]);
+
+  /* =========================================================
+     MAÇ
+  ========================================================= */
+
+  const openNewMatch = () => {
+    setEditingMatch(null);
+
+    setMatchForm({
+      league: "",
+      home_team: "",
+      away_team: "",
+      kickoff: "",
+      match_date: "",
+      home_score: "",
+      away_score: "",
+      broadcaster: "",
+      schedule_confirmed: true,
+      home_logo_url: "",
+      away_logo_url: "",
+    });
+
+    setMatchModal(true);
+  };
+
+  const openEditMatch = (match: Match) => {
+    setEditingMatch(match);
+
+    let localKickoff = "";
+
+    if (match.kickoff) {
+      const date = new Date(match.kickoff);
+
+      if (!Number.isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+
+        localKickoff =
+          `${year}-${month}-${day}T${hours}:${minutes}`;
+      }
+    }
+
+    setMatchForm({
+      league: match.league || "",
+      home_team: match.home_team || "",
+      away_team: match.away_team || "",
+      kickoff: localKickoff,
+      match_date: match.match_date || (localKickoff ? localKickoff.slice(0, 10) : ""),
+      home_score:
+        match.home_score === null
+          ? ""
+          : String(match.home_score),
+      away_score:
+        match.away_score === null
+          ? ""
+          : String(match.away_score),
+      broadcaster: match.broadcaster || "",
+      schedule_confirmed: Boolean(match.schedule_confirmed),
+      home_logo_url: match.home_logo_url || "",
+      away_logo_url: match.away_logo_url || "",
+    });
+
+    setMatchModal(true);
+  };
+
+  const uploadTeamLogo = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    side: "home" | "away"
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showError("Lütfen bir görsel dosyası seç.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showError("Logo dosyası en fazla 5 MB olabilir.");
+      return;
+    }
+
+    setUploadingLogo(side);
+
+    const extension =
+      file.name.split(".").pop()?.toLowerCase() || "png";
+
+    const safeName =
+      `${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}.${extension}`;
+
+    const path = `team-logos/${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("team-logos")
+      .upload(path, file, {
+        upsert: false,
+        contentType: file.type,
+      });
+
+    if (uploadError) {
+      console.error(uploadError);
+      setUploadingLogo(null);
+      showError(
+        "Logo yüklenemedi. team-logos bucket'ını kontrol et."
+      );
+      return;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage
+      .from("team-logos")
+      .getPublicUrl(path);
+
+    if (side === "home") {
+      setMatchForm((prev) => ({
+        ...prev,
+        home_logo_url: publicUrl,
+      }));
+    } else {
+      setMatchForm((prev) => ({
+        ...prev,
+        away_logo_url: publicUrl,
+      }));
+    }
+
+    setUploadingLogo(null);
+    showMessage(
+      `${side === "home" ? "Ev sahibi" : "Deplasman"} logosu yüklendi.`
+    );
+  };
+
+  const saveMatch = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (
+      !matchForm.home_team.trim() ||
+      !matchForm.away_team.trim()
+    ) {
+      showError(
+        "Ev sahibi ve deplasman takımı zorunludur."
+      );
+      return;
+    }
+
+    setSaving(true);
+
+    const matchDate = matchForm.match_date || null;
+    const kickoff = matchForm.kickoff
+      ? `${matchForm.kickoff}:00+03:00`
+      : null;
+
+    const payload = {
+      league: matchForm.league.trim() || null,
+      home_team: matchForm.home_team.trim(),
+      away_team: matchForm.away_team.trim(),
+      kickoff,
+      match_date: matchDate,
+      home_score:
+        matchForm.home_score === ""
+          ? null
+          : Number(matchForm.home_score),
+      away_score:
+        matchForm.away_score === ""
+          ? null
+          : Number(matchForm.away_score),
+      broadcaster:
+        matchForm.broadcaster.trim() || null,
+      schedule_confirmed:
+        matchForm.schedule_confirmed,
+      home_logo_url:
+        matchForm.home_logo_url.trim() || null,
+      away_logo_url:
+        matchForm.away_logo_url.trim() || null,
+    };
+
+    let result;
+
+    if (editingMatch) {
+      result = await supabase
+        .from("Matches")
+        .update(payload)
+        .eq("id", editingMatch.id);
+    } else {
+      result = await supabase
+        .from("Matches")
+        .insert(payload);
+    }
+
+    setSaving(false);
+
+    if (result.error) {
+      console.error(result.error);
+      showError(result.error.message);
+      return;
+    }
+
+    setMatchModal(false);
+
+    await loadMatches();
+
+    showMessage(
+      editingMatch
+        ? "Maç güncellendi."
+        : "Maç başarıyla eklendi."
+    );
+  };
+
+  const deleteMatch = async (match: Match) => {
+    const confirmed = window.confirm(
+      `${match.home_team} - ${match.away_team} maçını silmek istediğine emin misin?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("Matches")
+      .delete()
+      .eq("id", match.id);
+
+    if (error) {
+      console.error(error);
+      showError("Maç silinemedi.");
+      return;
+    }
+
+    await loadMatches();
+    showMessage("Maç silindi.");
+  };
+
+  const finishMatch = async (match: Match) => {
+    const homeScore = window.prompt(
+      `${match.home_team} kaç gol attı?`,
+      match.home_score === null
+        ? ""
+        : String(match.home_score)
+    );
+
+    if (homeScore === null) return;
+
+    const awayScore = window.prompt(
+      `${match.away_team} kaç gol attı?`,
+      match.away_score === null
+        ? ""
+        : String(match.away_score)
+    );
+
+    if (awayScore === null) return;
+
+    const home = Number(homeScore);
+    const away = Number(awayScore);
+
+    if (
+      !Number.isInteger(home) ||
+      !Number.isInteger(away) ||
+      home < 0 ||
+      away < 0
+    ) {
+      showError("Geçerli bir skor gir.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("Matches")
+      .update({
+        home_score: home,
+        away_score: away,
+        status: "finished",
+      })
+      .eq("id", match.id);
+
+    if (error) {
+      console.error(error);
+      showError("Maç tamamlanamadı.");
+      return;
+    }
+
+    await loadMatches();
+    showMessage("Maç tamamlandı.");
+  };
+
+  const setMatchStatus = async (match: Match, status: "live" | "halftime" | "finished") => {
+    let home: number | null = match.home_score;
+    let away: number | null = match.away_score;
+
+    if (status === "finished") {
+      const homeScore = window.prompt(`${match.home_team} kaç gol attı?`, home === null ? "" : String(home));
+      if (homeScore === null) return;
+      const awayScore = window.prompt(`${match.away_team} kaç gol attı?`, away === null ? "" : String(away));
+      if (awayScore === null) return;
+      home = Number(homeScore);
+      away = Number(awayScore);
+      if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) return showError("Geçerli bir skor gir.");
+    }
+
+    const { error } = await supabase.from("Matches").update({ status, home_score: home, away_score: away }).eq("id", match.id);
+    if (error) return showError("Maç durumu güncellenemedi: " + error.message);
+    await loadMatches();
+    showMessage(status === "live" ? "Maç CANLI yapıldı." : status === "halftime" ? "Maç DEVRE ARASI yapıldı." : "Maç tamamlandı.");
+  };
+
+  const updateLiveControl = async (match: Match, patch: { live_minute?: number; added_minute?: number; home_score?: number; away_score?: number; status?: string }) => {
+    const { error } = await supabase
+      .from("Matches")
+      .update(patch)
+      .eq("id", match.id);
+
+    if (error) {
+      console.error(error);
+      showError("Canlı maç bilgisi güncellenemedi: " + error.message);
+      return;
+    }
+
+    await loadMatches();
+  };
+
+  const setLiveMinute = async (match: Match) => {
+    const value = window.prompt("Canlı dakika (örn. 37 veya 90):", String(match.live_minute ?? 0));
+    if (value === null) return;
+    const minute = Number(value);
+    if (!Number.isInteger(minute) || minute < 0 || minute > 120) {
+      showError("Dakika 0 ile 120 arasında tam sayı olmalı.");
+      return;
+    }
+    await updateLiveControl(match, { live_minute: minute });
+  };
+

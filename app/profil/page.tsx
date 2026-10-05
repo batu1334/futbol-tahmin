@@ -3,71 +3,325 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-export default function ProfilPage() {
-  const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
+type Match = {
+  id: number;
+  home_team: string;
+  away_team: string;
+  kickoff: string | null;
+  match_date?: string | null;
+  league: string | null;
+  status: string;
+  home_score?: number | null;
+  away_score?: number | null;
+  home_logo_url?: string | null;
+  away_logo_url?: string | null;
+  broadcast_channel?: string | null;
+};
+
+type Prediction = {
+  match_id: number;
+  home_score: number;
+  away_score: number;
+};
+
+type BonusQuestion = {
+  id: number;
+  match_id: number;
+  question: string;
+  question_type: string;
+  option_a: string | null;
+  option_b: string | null;
+  option_c: string | null;
+  option_d: string | null;
+  points: number;
+};
+
+function formatKickoff(kickoff: string | null) {
+  if (!kickoff) return "Saat henüz belli değil";
+
+  const date = new Date(kickoff);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Saat bilgisi yok";
+  }
+
+  return date.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatDate(match: Match) {
+  if (match.match_date) {
+    const date = new Date(`${match.match_date}T12:00:00`);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("tr-TR", {
+        timeZone: "Europe/Istanbul",
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
+  }
+
+  if (match.kickoff) {
+    const date = new Date(match.kickoff);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("tr-TR", {
+        timeZone: "Europe/Istanbul",
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
+  }
+
+  return "Tarih belirtilmedi";
+}
+
+function canPredict(kickoff: string | null) {
+  if (!kickoff) return false;
+
+  const kickoffDate = new Date(kickoff);
+
+  if (Number.isNaN(kickoffDate.getTime())) {
+    return false;
+  }
+
+  const deadline = kickoffDate.getTime() - 10 * 60 * 1000;
+
+  return Date.now() < deadline;
+}
+
+function getPredictionStatus(kickoff: string | null) {
+  if (!kickoff) return "Saat bilgisi bekleniyor";
+
+  const kickoffDate = new Date(kickoff);
+
+  if (Number.isNaN(kickoffDate.getTime())) {
+    return "Saat bilgisi yok";
+  }
+
+  const deadline = kickoffDate.getTime() - 10 * 60 * 1000;
+
+  if (Date.now() >= kickoffDate.getTime()) {
+    return "Maç başladı / sona erdi";
+  }
+
+  if (Date.now() >= deadline) {
+    return "Tahmin süresi kapandı";
+  }
+
+  return "Tahmin yapılabilir";
+}
+
+export default function HomePage() {
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [predictions, setPredictions] = useState<
+    Record<number, Prediction>
+  >({});
+
+  const [bonusQuestions, setBonusQuestions] = useState<
+    Record<number, BonusQuestion>
+  >({});
+
+  const [bonusAnswers, setBonusAnswers] = useState<
+    Record<number, string>
+  >({});
+
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+
+  const [homeScore, setHomeScore] = useState("");
+  const [awayScore, setAwayScore] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<
     "success" | "error" | ""
   >("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+
+  const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
-    loadProfile();
+    loadPage();
   }, []);
 
-  async function loadProfile() {
+  async function loadPage() {
+    setLoading(true);
+
     const userResult = await supabase.auth.getUser();
 
-    if (!userResult.data.user) {
-      window.location.href = "/login";
-      return;
+    if (userResult.data.user) {
+      setUserEmail(userResult.data.user.email || "");
     }
 
-    const user = userResult.data.user;
-
-    setEmail(user.email || "");
-
-    const profileResult = await supabase
-      .from("profiles")
-      .select("display_name")
-      .eq("id", user.id)
-      .single();
-
-    if (profileResult.error) {
-      console.log(profileResult.error);
-    }
-
-    if (profileResult.data) {
-      setDisplayName(
-        profileResult.data.display_name || ""
-      );
-    }
+    await Promise.all([
+      loadMatches(),
+      loadPredictions(),
+      loadBonusQuestions(),
+    ]);
 
     setLoading(false);
   }
 
-  async function saveProfile() {
-    const newName = displayName.trim();
+  async function loadMatches() {
+    const result = await supabase
+      .from("Matches")
+      .select(
+        `
+        id,
+        home_team,
+        away_team,
+        kickoff,
+        match_date,
+        league,
+        status,
+        home_score,
+        away_score,
+        home_logo_url,
+        away_logo_url,
+        broadcast_channel
+        `
+      )
+      .order("kickoff", {
+        ascending: true,
+      });
+
+    if (result.error) {
+      console.log("Maçları yükleme hatası:", result.error);
+      return;
+    }
+
+    setMatches(result.data || []);
+  }
+
+  async function loadPredictions() {
+    const userResult = await supabase.auth.getUser();
+
+    if (!userResult.data.user) {
+      return;
+    }
+
+    const result = await supabase
+      .from("Predictions")
+      .select("match_id, home_score, away_score")
+      .eq("user_id", userResult.data.user.id);
+
+    if (result.error) {
+      console.log("Tahminleri yükleme hatası:", result.error);
+      return;
+    }
+
+    const predictionMap: Record<number, Prediction> = {};
+
+    for (const prediction of result.data || []) {
+      predictionMap[prediction.match_id] = prediction;
+    }
+
+    setPredictions(predictionMap);
+  }
+
+  async function loadBonusQuestions() {
+    const result = await supabase
+      .from("BonusQuestions")
+      .select(
+        `
+        id,
+        match_id,
+        question,
+        question_type,
+        option_a,
+        option_b,
+        option_c,
+        option_d,
+        points
+        `
+      );
+
+    if (result.error) {
+      console.log("Bonus soruları yükleme hatası:", result.error);
+      return;
+    }
+
+    const questionMap: Record<number, BonusQuestion> = {};
+
+    for (const question of result.data || []) {
+      questionMap[question.match_id] = question;
+    }
+
+    setBonusQuestions(questionMap);
+  }
+
+  function openPrediction(match: Match) {
+    setMessage("");
+    setMessageType("");
+
+    if (!canPredict(match.kickoff)) {
+      setMessage(
+        "Bu maç için tahmin süresi kapanmış. Tahminler maçtan 10 dakika öncesine kadar yapılabilir."
+      );
+      setMessageType("error");
+      return;
+    }
+
+    const existingPrediction = predictions[match.id];
+
+    if (existingPrediction) {
+      setHomeScore(String(existingPrediction.home_score));
+      setAwayScore(String(existingPrediction.away_score));
+    } else {
+      setHomeScore("");
+      setAwayScore("");
+    }
+
+    setSelectedMatch(match);
+  }
+
+  async function savePrediction() {
+    if (!selectedMatch) return;
 
     setMessage("");
     setMessageType("");
 
-    if (newName === "") {
-      setMessage("Kullanıcı adı boş bırakılamaz.");
+    const home = Number(homeScore);
+    const away = Number(awayScore);
+
+    if (
+      homeScore.trim() === "" ||
+      awayScore.trim() === "" ||
+      !Number.isInteger(home) ||
+      !Number.isInteger(away)
+    ) {
+      setMessage("Lütfen geçerli bir skor gir.");
       setMessageType("error");
       return;
     }
 
-    if (newName.length < 3) {
-      setMessage("Kullanıcı adı en az 3 karakter olmalı.");
+    if (home < 0 || away < 0) {
+      setMessage("Skor 0'dan küçük olamaz.");
       setMessageType("error");
       return;
     }
 
-    if (newName.length > 20) {
-      setMessage("Kullanıcı adı en fazla 20 karakter olabilir.");
+    if (home > 30 || away > 30) {
+      setMessage("Lütfen gerçekçi bir skor gir.");
+      setMessageType("error");
+      return;
+    }
+
+    if (!canPredict(selectedMatch.kickoff)) {
+      setMessage("Bu maç için tahmin süresi kapanmış.");
       setMessageType("error");
       return;
     }
@@ -77,6 +331,7 @@ export default function ProfilPage() {
     const userResult = await supabase.auth.getUser();
 
     if (!userResult.data.user) {
+      setSaving(false);
       window.location.href = "/login";
       return;
     }
@@ -84,40 +339,76 @@ export default function ProfilPage() {
     const userId = userResult.data.user.id;
 
     const result = await supabase
-      .from("profiles")
-      .update({
-        display_name: newName,
-      })
-      .eq("id", userId)
-      .select("display_name")
+      .from("Predictions")
+      .upsert(
+        {
+          user_id: userId,
+          match_id: selectedMatch.id,
+          home_score: home,
+          away_score: away,
+        },
+        {
+          onConflict: "user_id,match_id",
+        }
+      )
+      .select("match_id, home_score, away_score")
       .single();
 
     if (result.error) {
-      console.log(result.error);
+      console.log("Tahmin kaydetme hatası:", result.error);
 
       setSaving(false);
       setMessage(
-        "Kaydetme hatası: " + result.error.message
+        "Tahmin kaydedilemedi: " + result.error.message
       );
       setMessageType("error");
       return;
     }
 
-    setDisplayName(result.data.display_name);
+    setPredictions((previous) => ({
+      ...previous,
+      [selectedMatch.id]: result.data,
+    }));
 
     setSaving(false);
-    setMessage("Kullanıcı adın başarıyla güncellendi!");
+
+    setMessage("Tahminin başarıyla kaydedildi! ⚽");
     setMessageType("success");
+
+    setTimeout(() => {
+      setSelectedMatch(null);
+      setMessage("");
+      setMessageType("");
+    }, 1200);
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  function getStatusClass(match: Match) {
+    if (!match.kickoff) {
+      return "bg-slate-100 text-slate-500";
+    }
+
+    if (canPredict(match.kickoff)) {
+      return "bg-emerald-50 text-emerald-700";
+    }
+
+    return "bg-red-50 text-red-600";
   }
 
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-100">
-        <div className="mx-auto max-w-3xl px-5 py-10">
-          <div className="animate-pulse rounded-3xl bg-white p-8 shadow-sm">
-            <div className="h-8 w-40 rounded-lg bg-slate-200" />
-            <div className="mt-6 h-14 rounded-xl bg-slate-100" />
-            <div className="mt-4 h-14 rounded-xl bg-slate-100" />
+        <div className="mx-auto max-w-5xl px-5 py-10">
+          <div className="animate-pulse">
+            <div className="h-20 rounded-3xl bg-white" />
+
+            <div className="mt-6 h-48 rounded-3xl bg-white" />
+
+            <div className="mt-6 h-48 rounded-3xl bg-white" />
           </div>
         </div>
       </main>
@@ -127,8 +418,8 @@ export default function ProfilPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
       {/* HEADER */}
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-4">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
           <button
             type="button"
             onClick={() => {
@@ -151,214 +442,530 @@ export default function ProfilPage() {
             </div>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              window.location.href = "/";
-            }}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-blue-200 hover:text-blue-600"
-          >
-            ← Ana Sayfa
-          </button>
+          <div className="flex items-center gap-2">
+            {userEmail ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.location.href = "/profil";
+                  }}
+                  className="hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-blue-200 hover:text-blue-600 sm:block"
+                >
+                  👤 Profil
+                </button>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-700"
+                >
+                  Çıkış
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = "/login";
+                }}
+                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+              >
+                Giriş Yap
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5 py-8 md:py-10">
-        {/* HERO */}
-        <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-blue-700 via-blue-600 to-blue-800 p-7 text-white shadow-2xl shadow-blue-200 md:p-10">
-          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
+      {/* HERO */}
+      <section className="px-5 pt-6">
+        <div className="mx-auto max-w-6xl">
+          <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-blue-700 via-blue-600 to-blue-800 p-7 text-white shadow-2xl shadow-blue-200 md:p-10">
+            <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
 
-          <div className="relative">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-3xl backdrop-blur">
-              👤
+            <div className="relative max-w-3xl">
+              <div className="mb-5 inline-flex rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold backdrop-blur">
+                ⚽ Avrupa Futbol Tahminleri
+              </div>
+
+              <h1 className="text-3xl font-black tracking-tight md:text-5xl">
+                Maçları tahmin et,
+                <br />
+                puanlarını topla!
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-6 text-blue-100 md:text-base">
+                Maç sonuçlarını tahmin et, doğru skorlarla daha fazla puan
+                kazan. Tahminler maç başlamadan 10 dakika öncesine kadar
+                açıktır.
+              </p>
             </div>
+          </div>
+        </div>
+      </section>
 
-            <h1 className="mt-5 text-3xl font-black tracking-tight md:text-4xl">
-              Profilim
-            </h1>
+      {/* CONTENT */}
+      <div className="mx-auto max-w-6xl px-5 py-8">
+        {/* INFO */}
+        <div className="mb-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-2xl">🎯</div>
 
-            <p className="mt-2 text-sm text-blue-100 md:text-base">
-              Hesap bilgilerini ve kullanıcı adını buradan yönet.
+            <h3 className="mt-3 font-black">
+              Tam skor
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Tam skor tahmini: <strong>20 puan</strong>
             </p>
           </div>
-        </section>
 
-        {/* PROFILE CARD */}
-        <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          {/* ACCOUNT */}
-          <div className="border-b border-slate-100 p-6 md:p-7">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-lg">
-                ✉️
-              </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-2xl">🔥</div>
 
-              <div>
-                <h2 className="font-black text-slate-950">
-                  Hesap Bilgileri
-                </h2>
+            <h3 className="mt-3 font-black">
+              Yakın tahmin
+            </h3>
 
-                <p className="text-xs text-slate-400">
-                  Hesabına ait temel bilgiler
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label className="text-xs font-black uppercase tracking-wider text-slate-400">
-                E-posta
-              </label>
-
-              <div className="mt-2 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <span className="text-lg">📧</span>
-
-                <p className="min-w-0 truncate text-sm font-semibold text-slate-700">
-                  {email}
-                </p>
-
-                <span className="ml-auto shrink-0 rounded-full bg-slate-200 px-3 py-1 text-[10px] font-black text-slate-500">
-                  HESAP
-                </span>
-              </div>
-            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              1 fark: <strong>10 puan</strong> · 2 fark:{" "}
+              <strong>5 puan</strong>
+            </p>
           </div>
 
-          {/* USERNAME */}
-          <div className="p-6 md:p-7">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-lg">
-                ✏️
-              </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-2xl">⏰</div>
 
-              <div>
-                <h2 className="font-black text-slate-950">
-                  Kullanıcı Adı
-                </h2>
+            <h3 className="mt-3 font-black">
+              Son 10 dakika
+            </h3>
 
-                <p className="text-xs text-slate-400">
-                  Sıralamada ve uygulamada görünecek adın
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label
-                htmlFor="displayName"
-                className="text-xs font-black uppercase tracking-wider text-slate-400"
-              >
-                Kullanıcı adın
-              </label>
-
-              <div className="relative mt-2">
-                <input
-                  id="displayName"
-                  type="text"
-                  value={displayName}
-                  maxLength={20}
-                  onChange={(e) => {
-                    setDisplayName(e.target.value);
-                    setMessage("");
-                    setMessageType("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !saving) {
-                      saveProfile();
-                    }
-                  }}
-                  placeholder="Kullanıcı adını yaz"
-                  className="w-full rounded-2xl border border-slate-200 bg-white p-4 pr-16 text-base font-semibold text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-                />
-
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-300">
-                  {displayName.length}/20
-                </span>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <p className="text-xs text-slate-400">
-                  3-20 karakter arasında olmalıdır.
-                </p>
-
-                {displayName.trim().length >= 3 && (
-                  <span className="text-xs font-bold text-emerald-500">
-                    ✓ Uygun
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* MESSAGE */}
-            {message !== "" && (
-              <div
-                className={
-                  "mt-5 rounded-2xl border p-4 text-sm font-semibold " +
-                  (messageType === "success"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-red-200 bg-red-50 text-red-600")
-                }
-              >
-                {messageType === "success" ? "✓ " : "⚠️ "}
-                {message}
-              </div>
-            )}
-
-            {/* SAVE */}
-            <button
-              type="button"
-              onClick={saveProfile}
-              disabled={saving}
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 p-4 font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-            >
-              {saving ? (
-                <>
-                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  Kaydediliyor...
-                </>
-              ) : (
-                <>💾 Kullanıcı Adını Kaydet</>
-              )}
-            </button>
+            <p className="mt-1 text-sm text-slate-500">
+              Tahminler maçtan 10 dakika önce kapanır.
+            </p>
           </div>
-        </section>
+        </div>
 
-        {/* INFO */}
-        <section className="mt-6 rounded-3xl border border-blue-100 bg-blue-50 p-5">
-          <div className="flex gap-3">
-            <div className="text-xl">💡</div>
-
+        {/* MATCHES */}
+        <section>
+          <div className="mb-5 flex items-end justify-between gap-4">
             <div>
-              <p className="font-black text-blue-900">
-                Kullanıcı adın nerelerde görünür?
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
+                MAÇLAR
               </p>
 
-              <p className="mt-1 text-sm leading-6 text-blue-700">
-                Kullanıcı adın sıralama tablosunda, profilinde ve
-                tahmin uygulamasındaki oyuncu bilgilerinde kullanılır.
-              </p>
+              <h2 className="mt-1 text-2xl font-black tracking-tight">
+                Tahminlerini yap
+              </h2>
+            </div>
+
+            <div className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-500 shadow-sm">
+              {matches.length} maç
             </div>
           </div>
+
+          {matches.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <div className="text-5xl">⚽</div>
+
+              <h3 className="mt-4 text-xl font-black">
+                Henüz maç eklenmedi
+              </h3>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Admin panelinden maçlar eklendiğinde burada görünecek.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {matches.map((match) => {
+                const prediction = predictions[match.id];
+                const bonus = bonusQuestions[match.id];
+                const available = canPredict(match.kickoff);
+
+                return (
+                  <article
+                    key={match.id}
+                    className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
+                  >
+                    {/* MATCH TOP */}
+                    <div className="border-b border-slate-100 px-5 py-4 md:px-6">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-black uppercase tracking-[0.15em] text-blue-600">
+                            {match.league || "Avrupa Futbolu"}
+                          </p>
+
+                          <p className="mt-1 text-sm font-bold text-slate-500">
+                            {formatDate(match)}
+                          </p>
+                        </div>
+
+                        <div
+                          className={`rounded-xl px-3 py-2 text-xs font-black ${getStatusClass(
+                            match
+                          )}`}
+                        >
+                          {getPredictionStatus(match.kickoff)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TEAMS */}
+                    <div className="px-5 py-6 md:px-8 md:py-8">
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 md:gap-8">
+                        {/* HOME */}
+                        <div className="text-center">
+                          <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-3xl">
+                            {match.home_logo_url ? (
+                              <img
+                                src={match.home_logo_url}
+                                alt={match.home_team}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              "⚽"
+                            )}
+                          </div>
+
+                          <p className="mt-3 text-sm font-black md:text-base">
+                            {match.home_team}
+                          </p>
+                        </div>
+
+                        {/* TIME */}
+                        <div className="text-center">
+                          <p className="text-xs font-bold text-slate-400">
+                            TÜRKİYE SAATİ
+                          </p>
+
+                          <p className="mt-1 text-2xl font-black tracking-tight text-slate-950 md:text-3xl">
+                            {match.kickoff
+                              ? new Date(match.kickoff).toLocaleTimeString(
+                                  "tr-TR",
+                                  {
+                                    timeZone: "Europe/Istanbul",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  }
+                                )
+                              : "--:--"}
+                          </p>
+
+                          <div className="my-2 text-xs font-black text-slate-300">
+                            VS
+                          </div>
+                        </div>
+
+                        {/* AWAY */}
+                        <div className="text-center">
+                          <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-3xl">
+                            {match.away_logo_url ? (
+                              <img
+                                src={match.away_logo_url}
+                                alt={match.away_team}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              "⚽"
+                            )}
+                          </div>
+
+                          <p className="mt-3 text-sm font-black md:text-base">
+                            {match.away_team}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* BROADCAST */}
+                      {match.broadcast_channel && (
+                        <div className="mt-5 text-center">
+                          <span className="inline-flex rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
+                            📺 {match.broadcast_channel}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* PREDICTION */}
+                      <div className="mt-6">
+                        {prediction ? (
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-black uppercase tracking-wider text-emerald-600">
+                                  TAHMİNİN
+                                </p>
+
+                                <p className="mt-1 text-2xl font-black text-emerald-800">
+                                  {prediction.home_score} -{" "}
+                                  {prediction.away_score}
+                                </p>
+                              </div>
+
+                              {available && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openPrediction(match)
+                                  }
+                                  className="rounded-xl bg-white px-4 py-2.5 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-100"
+                                >
+                                  Tahmini Değiştir
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openPrediction(match)}
+                            disabled={!available}
+                            className={`w-full rounded-2xl px-5 py-4 text-sm font-black transition ${
+                              available
+                                ? "bg-blue-600 text-white shadow-lg shadow-blue-200 hover:bg-blue-700"
+                                : "cursor-not-allowed bg-slate-100 text-slate-400"
+                            }`}
+                          >
+                            {available
+                              ? "⚽ Tahmin Yap"
+                              : "🔒 Tahmin Süresi Kapandı"}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* BONUS QUESTION */}
+                      {bonus && (
+                        <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-5">
+                          <div className="flex items-start gap-3">
+                            <div className="text-2xl">⭐</div>
+
+                            <div className="flex-1">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <h3 className="font-black text-amber-900">
+                                  Bonus Soru
+                                </h3>
+
+                                <span className="rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-800">
+                                  +{bonus.points} PUAN
+                                </span>
+                              </div>
+
+                              <p className="mt-2 text-sm font-bold leading-6 text-amber-900">
+                                {bonus.question}
+                              </p>
+
+                              {bonus.question_type === "multiple_choice" && (
+                                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                  {[
+                                    {
+                                      key: "A",
+                                      value: bonus.option_a,
+                                    },
+                                    {
+                                      key: "B",
+                                      value: bonus.option_b,
+                                    },
+                                    {
+                                      key: "C",
+                                      value: bonus.option_c,
+                                    },
+                                    {
+                                      key: "D",
+                                      value: bonus.option_d,
+                                    },
+                                  ]
+                                    .filter(
+                                      (option) => option.value
+                                    )
+                                    .map((option) => (
+                                      <button
+                                        key={option.key}
+                                        type="button"
+                                        disabled={!available}
+                                        onClick={() => {
+                                          setBonusAnswers(
+                                            (previous) => ({
+                                              ...previous,
+                                              [match.id]:
+                                                option.key,
+                                            })
+                                          );
+                                        }}
+                                        className={`rounded-xl border px-4 py-3 text-left text-sm font-bold transition ${
+                                          bonusAnswers[match.id] ===
+                                          option.key
+                                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                                            : "border-amber-200 bg-white text-slate-700 hover:border-blue-300"
+                                        } ${
+                                          !available
+                                            ? "cursor-not-allowed opacity-60"
+                                            : ""
+                                        }`}
+                                      >
+                                        <span className="mr-2 font-black">
+                                          {option.key}.
+                                        </span>
+
+                                        {option.value}
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
-
-        {/* BACK */}
-        <button
-          type="button"
-          onClick={() => {
-            window.location.href = "/";
-          }}
-          className="mt-6 w-full rounded-2xl border border-slate-200 bg-white p-4 font-bold text-slate-600 shadow-sm transition hover:border-blue-200 hover:text-blue-600"
-        >
-          ← Ana Sayfaya Dön
-        </button>
-
-        <footer className="py-8 text-center">
-          <p className="font-black text-slate-800">
-            ⚽ FUTBOL TAHMİN
-          </p>
-
-          <p className="mt-1 text-xs text-slate-400">
-            Tahmin et • Puan kazan • Sıralamada yüksel
-          </p>
-        </footer>
       </div>
+
+      {/* PREDICTION MODAL */}
+      {selectedMatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="bg-gradient-to-br from-blue-700 to-blue-800 p-6 text-white">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wider text-blue-200">
+                    TAHMİNİNİ GİR
+                  </p>
+
+                  <h2 className="mt-2 text-2xl font-black">
+                    {selectedMatch.home_team}
+                    <span className="mx-2 text-blue-300">
+                      vs
+                    </span>
+                    {selectedMatch.away_team}
+                  </h2>
+
+                  <p className="mt-2 text-sm text-blue-100">
+                    🇹🇷{" "}
+                    {formatKickoff(selectedMatch.kickoff)}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedMatch(null)}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-xl text-white hover:bg-white/20"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="mb-4 text-center text-sm font-bold text-slate-500">
+                Maç sonucunu tahmin et
+              </p>
+
+              <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
+                <div>
+                  <label className="mb-2 block text-center text-xs font-black text-slate-500">
+                    {selectedMatch.home_team}
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    value={homeScore}
+                    onChange={(event) =>
+                      setHomeScore(event.target.value)
+                    }
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-center text-3xl font-black outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    placeholder="0"
+                  />
+                </div>
+
+                <div className="pb-4 text-xl font-black text-slate-300">
+                  -
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-center text-xs font-black text-slate-500">
+                    {selectedMatch.away_team}
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    value={awayScore}
+                    onChange={(event) =>
+                      setAwayScore(event.target.value)
+                    }
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-center text-3xl font-black outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-center">
+                <p className="text-xs font-bold text-slate-500">
+                  Puanlama
+                </p>
+
+                <div className="mt-2 flex justify-center gap-4 text-sm font-black">
+                  <span className="text-blue-600">
+                    Tam skor: 20
+                  </span>
+
+                  <span className="text-emerald-600">
+                    1 fark: 10
+                  </span>
+
+                  <span className="text-amber-600">
+                    2 fark: 5
+                  </span>
+                </div>
+              </div>
+
+              {message && (
+                <div
+                  className={`mt-4 rounded-2xl px-4 py-3 text-sm font-bold ${
+                    messageType === "success"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {message}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={savePrediction}
+                disabled={saving}
+                className="mt-5 w-full rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving
+                  ? "Kaydediliyor..."
+                  : "Tahminimi Kaydet"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedMatch(null);
+                  setMessage("");
+                  setMessageType("");
+                }}
+                className="mt-2 w-full rounded-2xl px-5 py-3 text-sm font-bold text-slate-500 transition hover:bg-slate-100"
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

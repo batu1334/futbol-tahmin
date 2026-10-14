@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
@@ -20,6 +20,9 @@ type Match = {
   schedule_confirmed: boolean | null;
   home_logo_url: string | null;
   away_logo_url: string | null;
+  featured_on_home?: boolean | null;
+  card_background_color?: string | null;
+  league_logo_url?: string | null;
   broadcaster: string | null;
 };
 
@@ -148,6 +151,23 @@ export default function AdminPage() {
   >("matches");
 
   const [matches, setMatches] = useState<Match[]>([]);
+  const [matchSearchTerm, setMatchSearchTerm] = useState("");
+  const [matchDateFrom, setMatchDateFrom] = useState("");
+  const [matchDateTo, setMatchDateTo] = useState("");
+
+  const filteredAdminMatches = matches.filter((match) => {
+    const search = matchSearchTerm.trim().toLocaleLowerCase("tr-TR");
+    const home = (match.home_team || "").toLocaleLowerCase("tr-TR");
+    const away = (match.away_team || "").toLocaleLowerCase("tr-TR");
+    const matchDay = (match.match_date || match.kickoff || "").slice(0, 10);
+
+    const teamMatches =
+      !search || home.includes(search) || away.includes(search);
+    const fromMatches = !matchDateFrom || (matchDay && matchDay >= matchDateFrom);
+    const toMatches = !matchDateTo || (matchDay && matchDay <= matchDateTo);
+
+    return Boolean(teamMatches && fromMatches && toMatches);
+  });
   const [bonusQuestions, setBonusQuestions] = useState<BonusQuestion[]>([]);
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -164,6 +184,11 @@ export default function AdminPage() {
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [matchEvents, setMatchEvents] = useState<Record<number, MatchEvent[]>>({});
   const [lineups, setLineups] = useState<Record<number, MatchLineup[]>>({});
+  const [lineupTeamSettings, setLineupTeamSettings] = useState<Record<"home" | "away", { coach_name: string; formation: string }>>({
+    home: { coach_name: "", formation: "4-3-3" },
+    away: { coach_name: "", formation: "4-3-3" },
+  });
+  const [lineupSettingsSaving, setLineupSettingsSaving] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
   const [lineupMatch, setLineupMatch] = useState<Match | null>(null);
   const [lineupSaving, setLineupSaving] = useState(false);
@@ -388,8 +413,47 @@ export default function AdminPage() {
       position: "",
       photo_url: "",
     });
+    const { data: teamSettings, error: settingsError } = await supabase
+      .from("MatchLineupSettings")
+      .select("team, coach_name, formation")
+      .eq("match_id", match.id);
+    if (settingsError) {
+      console.error(settingsError);
+      showError("Teknik direktör/diziliş bilgileri yüklenemedi. SQL kurulumunu çalıştır: " + settingsError.message);
+    } else {
+      const nextSettings = {
+        home: { coach_name: "", formation: "4-3-3" },
+        away: { coach_name: "", formation: "4-3-3" },
+      };
+      for (const row of teamSettings || []) {
+        if (row.team === "home" || row.team === "away") {
+          nextSettings[row.team as "home" | "away"] = { coach_name: row.coach_name || "", formation: row.formation || "4-3-3" };
+        }
+      }
+      setLineupTeamSettings(nextSettings);
+    }
     await loadMatchLineups(match.id);
     setLineupModal(true);
+  };
+
+  const saveLineupTeamSettings = async (team: "home" | "away") => {
+    if (!lineupMatch) return;
+    setLineupSettingsSaving(true);
+    const setting = lineupTeamSettings[team];
+    const { error } = await supabase.from("MatchLineupSettings").upsert({
+      match_id: lineupMatch.id,
+      team,
+      coach_name: setting.coach_name.trim() || null,
+      formation: setting.formation,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "match_id,team" });
+    setLineupSettingsSaving(false);
+    if (error) {
+      console.error(error);
+      showError("Teknik direktör/diziliş kaydedilemedi: " + error.message);
+      return;
+    }
+    showMessage(`${team === "home" ? lineupMatch.home_team : lineupMatch.away_team} teknik direktörü ve dizilişi kaydedildi.`);
   };
 
   const uploadLineupPhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2064,7 +2128,7 @@ export default function AdminPage() {
               }`}
             >
               {label}
-            </button>
+                        </button>
           ))}
         </div>
 
@@ -2084,11 +2148,59 @@ export default function AdminPage() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+              <label className="block">
+                <span className="mb-1 block text-xs font-extrabold text-slate-700">Takım ara</span>
+                <input
+                  type="search"
+                  value={matchSearchTerm}
+                  onChange={(e) => setMatchSearchTerm(e.target.value)}
+                  placeholder="Takım adını yaz..."
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-extrabold text-slate-700">Başlangıç tarihi</span>
+                <input
+                  type="date"
+                  value={matchDateFrom}
+                  onChange={(e) => setMatchDateFrom(e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-extrabold text-slate-700">Bitiş tarihi</span>
+                <input
+                  type="date"
+                  min={matchDateFrom || undefined}
+                  value={matchDateTo}
+                  onChange={(e) => setMatchDateTo(e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <div className="flex flex-col justify-end gap-2">
+                <p className="text-xs font-bold text-slate-500">
+                  {filteredAdminMatches.length} / {matches.length} maç gösteriliyor
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMatchSearchTerm("");
+                    setMatchDateFrom("");
+                    setMatchDateTo("");
+                  }}
+                  className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                >
+                  Filtreleri temizle
+                </button>
+              </div>
+            </div>
+
+<div className="mt-4 space-y-3">
               {matches.length === 0 ? (
                 <Empty text="Henüz maç yok." />
               ) : (
-                matches.map((match) => (
+                filteredAdminMatches.map((match) => (
                   <div key={match.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div className="min-w-0 flex-1">
@@ -2125,6 +2237,26 @@ export default function AdminPage() {
                         <p className="mt-1 text-xs font-semibold text-slate-400">
                           {formatDate(match.kickoff)}{match.broadcaster ? ` • ${match.broadcaster}` : ""}
                         </p>
+
+                        <div className="mt-4 grid gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-3 sm:grid-cols-2">
+                          <label className="flex items-center gap-3 rounded-xl bg-white p-3 text-xs font-extrabold text-slate-800">
+                            <input type="checkbox" checked={Boolean(match.featured_on_home)} onChange={async (event) => { const value = event.target.checked; const { error } = await supabase.from("Matches").update({ featured_on_home: value }).eq("id", match.id); if (error) { showError("Öne çıkan maç kaydedilemedi: " + error.message); return; } await loadMatches(); showMessage(value ? "Maç ana sayfada öne çıkarıldı." : "Maç öne çıkanlardan kaldırıldı."); }} className="h-4 w-4 accent-red-600" />
+                            Ana sayfada öne çıkar
+                          </label>
+                          <label className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 text-xs font-extrabold text-slate-800">
+                            Kart arka planı
+                            <input type="color" aria-label="Maç kartı arka plan rengi" value={match.card_background_color || "#FFFFFF"} onChange={async (event) => { const value = event.target.value; const { error } = await supabase.from("Matches").update({ card_background_color: value }).eq("id", match.id); if (error) { showError("Kart rengi kaydedilemedi: " + error.message); return; } await loadMatches(); showMessage("Maç kartı rengi kaydedildi."); }} className="h-9 w-12 cursor-pointer rounded border border-slate-200 p-1" />
+                          </label>
+                          <label className="sm:col-span-2 block text-xs font-extrabold text-slate-800">
+                            Lig logosu / arka plan görseli URL
+                            <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                              <input key={`league-logo-${match.id}-${match.league_logo_url || ""}`} defaultValue={match.league_logo_url || ""} onBlur={async (event) => { const value = event.currentTarget.value.trim() || null; if (value === (match.league_logo_url || null)) return; const { error } = await supabase.from("Matches").update({ league_logo_url: value }).eq("id", match.id); if (error) { showError("Lig logosu kaydedilemedi: " + error.message); return; } await loadMatches(); showMessage("Lig logosu/arka planı kaydedildi."); }} placeholder="https://.../lig-logosu.png" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold" />
+                              <span className="flex items-center text-[10px] font-bold text-slate-500">URL yazıp alandan çıkınca kaydedilir</span>
+                            </div>
+                            <input type="file" accept="image/*" aria-label="Bilgisayardan lig logosu seç" className="mt-2 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold" onChange={async (event) => { const input = event.currentTarget; const file = input.files?.[0]; if (!file) return; if (!file.type.startsWith("image/")) { showError("Lütfen görsel dosyası seç."); input.value = ""; return; } const ext = file.name.split(".").pop() || "png"; const path = `league-backgrounds/${match.id}-${Date.now()}.${ext}`; const { error: uploadError } = await supabase.storage.from("team-logos").upload(path, file, { upsert: true, contentType: file.type }); if (uploadError) { showError("Lig logosu yüklenemedi: " + uploadError.message); input.value = ""; return; } const { data: { publicUrl } } = supabase.storage.from("team-logos").getPublicUrl(path); const { error } = await supabase.from("Matches").update({ league_logo_url: publicUrl }).eq("id", match.id); if (error) { showError("Lig logosu kaydedilemedi: " + error.message); return; } await loadMatches(); showMessage("Lig logosu bilgisayardan yüklendi."); input.value = ""; }} />
+                            <span className="mt-1 block text-[10px] font-bold text-slate-500">Veya bilgisayarından görsel seç</span>
+                          </label>
+                        </div>
 
                         {(match.status === "live" || match.status === "halftime" || match.status === "finished") && (
                           <div className="mt-2">
@@ -2381,6 +2513,24 @@ export default function AdminPage() {
       {lineupModal && lineupMatch && (
         <Modal title={`Kadro Yönetimi — ${lineupMatch.home_team} vs ${lineupMatch.away_team}`} onClose={() => setLineupModal(false)}>
           <div className="space-y-5">
+            <section className="grid gap-3 sm:grid-cols-2">
+              {(["home", "away"] as const).map((team) => (
+                <div key={team} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="mb-3 font-black text-[#0f2747]">{team === "home" ? lineupMatch.home_team : lineupMatch.away_team}</h3>
+                  <div className="space-y-3">
+                    <Field label="Teknik direktör">
+                      <input value={lineupTeamSettings[team].coach_name} onChange={(e) => setLineupTeamSettings((prev) => ({ ...prev, [team]: { ...prev[team], coach_name: e.target.value } }))} className={inputClass} placeholder="Teknik direktör adı" />
+                    </Field>
+                    <Field label="Diziliş">
+                      <select value={lineupTeamSettings[team].formation} onChange={(e) => setLineupTeamSettings((prev) => ({ ...prev, [team]: { ...prev[team], formation: e.target.value } }))} className={inputClass}>
+                        {(["4-3-3", "4-2-3-1", "4-4-2", "3-5-2", "3-4-3", "3-4-2-1", "4-1-4-1", "4-5-1", "5-3-2", "5-4-1", "4-3-2-1"] as const).map((formation) => <option key={formation} value={formation}>{formation}</option>)}
+                      </select>
+                    </Field>
+                    <button type="button" disabled={lineupSettingsSaving} onClick={() => void saveLineupTeamSettings(team)} className="w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">{lineupSettingsSaving ? "Kaydediliyor..." : "Teknik direktör ve dizilişi kaydet"}</button>
+                  </div>
+                </div>
+              ))}
+            </section>
             <form onSubmit={saveLineupPlayer} className="rounded-2xl border border-cyan-100 bg-cyan-50/50 p-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Takım"><select value={lineupForm.team} onChange={(e) => setLineupForm((p) => ({ ...p, team: e.target.value as "home" | "away" }))} className={inputClass}><option value="home">{lineupMatch.home_team}</option><option value="away">{lineupMatch.away_team}</option></select></Field>
@@ -2519,7 +2669,7 @@ function FootballDataManager() {
   type League = { id:number; name:string; country:string|null; season:string|null; logo_url:string|null; is_active:boolean|null };
   type Team = { id:number; name:string; short_name:string|null; country:string|null; logo_url:string|null; league_id:number|null; stadium:string|null; is_active:boolean|null };
   type Standing = { id:number; league_id:number; team_id:number; standing_position:number|null; played:number; wins:number; draws:number; losses:number; goals_for:number; goals_against:number; goal_difference:number; points:number; season:string|null };
-  type LiveMatch = { id:number; league:string|null; home_team:string; away_team:string; home_score:number|null; away_score:number|null; status:string|null; live_minute:number|null; live_second:number|null; live_period:string|null; live_is_running:boolean|null };
+  type LiveMatch = { id:number; league:string|null; home_team:string; away_team:string; home_score:number|null; away_score:number|null; status:string|null; live_minute:number|null; live_second:number|null; live_period:string|null; live_is_running:boolean|null; live_started_at:string|null };
 
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"leagues"|"teams"|"standings"|"live"|"career">("leagues");
@@ -2542,7 +2692,7 @@ function FootballDataManager() {
   const [teamForm,setTeamForm]=useState({id:"",name:"",short_name:"",country:"",logo_url:"",league_id:"",stadium:"",is_active:true});
   const [standingForm,setStandingForm]=useState({id:"",league_id:"",team_id:"",standing_position:"",played:"0",wins:"0",draws:"0",losses:"0",goals_for:"0",goals_against:"0",goal_difference:"0",points:"0",season:""});
   const [selectedMatch,setSelectedMatch]=useState("");
-  const [liveForm,setLiveForm]=useState({minute:"0",second:"0",period:"1",running:false});
+  const [liveForm,setLiveForm]=useState({minute:"0",second:"0",period:"1",running:false,home_team:"",away_team:""});
 
   const loadAll=async()=>{
     setLoading(true);
@@ -2565,7 +2715,7 @@ function FootballDataManager() {
     if(!m.error){
       const base=(m.data||[]) as Array<any>;
       // Canlı alanlar mevcutsa onları ayrıca al ve temel maçlarla birleştir.
-      const live=await supabase.from("Matches").select("id,live_minute,live_second,live_period,live_is_running");
+      const live=await supabase.from("Matches").select("id,live_minute,live_second,live_period,live_is_running,live_started_at");
       const liveMap=new Map<number,any>((live.data||[]).map((x:any)=>[Number(x.id),x]));
       setMatches(base.map((x:any)=>({
         ...x,
@@ -2573,6 +2723,7 @@ function FootballDataManager() {
         live_second:liveMap.get(Number(x.id))?.live_second ?? null,
         live_period:liveMap.get(Number(x.id))?.live_period ?? "1",
         live_is_running:liveMap.get(Number(x.id))?.live_is_running ?? false,
+        live_started_at:liveMap.get(Number(x.id))?.live_started_at ?? null,
       })) as LiveMatch[]);
     }else{
       console.error(m.error);
@@ -2628,12 +2779,74 @@ function FootballDataManager() {
     if(!selectedTeam){notify("Lütfen bir takım seç.");setLoading(false);return;}
     const payload={league_id:Number(standingForm.league_id),team_id:Number(standingForm.team_id),team_name:selectedTeam.name,standing_position:standingForm.standing_position?Number(standingForm.standing_position):null,played:Number(standingForm.played)||0,wins:Number(standingForm.wins)||0,draws:Number(standingForm.draws)||0,losses:Number(standingForm.losses)||0,goals_for:Number(standingForm.goals_for)||0,goals_against:Number(standingForm.goals_against)||0,points:Number(standingForm.points)||0,season:standingForm.season||null};const q=standingForm.id?supabase.from("league_standings").update(payload).eq("id",Number(standingForm.id)):supabase.from("league_standings").upsert(payload,{onConflict:"league_id,team_id"});const {error}=await q;if(error) notify(error.message);else{notify("Puan durumu kaydedildi");setStandingForm({id:"",league_id:"",team_id:"",standing_position:"",played:"0",wins:"0",draws:"0",losses:"0",goals_for:"0",goals_against:"0",goal_difference:"0",points:"0",season:""});await loadAll()}setLoading(false)};
   const deleteRow=async(table:string,id:number)=>{if(!confirm("Bu kaydı silmek istediğine emin misin?"))return;const {error}=await supabase.from(table).delete().eq("id",id);if(error)notify(error.message);else{notify("Silindi");await loadAll()}};
+
+  // Yalnızca kullanıcının belirlediği altı ligdeki takımları bırakır.
+  const normalizeLeagueText = (value: string) => value
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[ıİ]/g, "i").replace(/[şŞ]/g, "s").replace(/[ğĞ]/g, "g")
+    .replace(/[üÜ]/g, "u").replace(/[öÖ]/g, "o").replace(/[çÇ]/g, "c")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+
+  const leagueKind = (value: string) => {
+    const name = normalizeLeagueText(value);
+    if (name.includes("bundesliga")) return "bundesliga";
+    if (name.includes("eredivisie")) return "eredivisie";
+    if (name.includes("ligue 1") || name.includes("ligue1")) return "ligue1";
+    if (name.includes("premier league") || name.includes("premier lig") || name === "epl" || name.includes("england premier") || name.includes("ingiltere premier")) return "premier";
+    if (name.includes("la liga") || name.includes("laliga")) return "laliga";
+    if (name.includes("super lig") || name.includes("superlig") || name.includes("trendyol super")) return "superlig";
+    return null;
+  };
+
+  const cleanupTeamsOutsideSixLeagues = async () => {
+    const allowedLeagues = leagues.filter((league) => leagueKind(league.name) !== null);
+    const allowedKinds = new Set(allowedLeagues.map((league) => leagueKind(league.name)));
+    const requiredKinds = ["superlig", "bundesliga", "premier", "eredivisie", "laliga", "ligue1"] as const;
+    const missing = requiredKinds.filter((kind) => !allowedKinds.has(kind));
+    if (missing.length) {
+      notify("Güvenlik için silme durduruldu: Ligler bölümünde altı ligin tamamı tanınamadı. Önce lig adlarını kontrol et.");
+      return;
+    }
+
+    const allowedLeagueIds = new Set(allowedLeagues.map((league) => league.id));
+    const teamsToDelete = teams.filter((team) => team.league_id === null || !allowedLeagueIds.has(team.league_id));
+    if (!teamsToDelete.length) {
+      notify("Bu altı lig dışında silinecek takım bulunamadı.");
+      return;
+    }
+
+    const leagueNames = requiredKinds.map((kind) => allowedLeagues.find((league) => leagueKind(league.name) === kind)?.name).filter(Boolean);
+    const confirmed = window.confirm(
+      `${teamsToDelete.length} takım silinecek. Yalnızca şu liglere bağlı takımlar kalacak:\n\n${leagueNames.join("\n")}\n\nBu işlem, silinecek takımların puan durumu satırlarını da temizler. Maçlar ve oyuncu kayıtları silinmez. Devam edilsin mi?`
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    const ids = teamsToDelete.map((team) => team.id);
+    try {
+      // Çok sayıda ID olduğunda istekleri küçük gruplar halinde gönder.
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const standingsResult = await supabase.from("league_standings").delete().in("team_id", batch);
+        if (standingsResult.error && standingsResult.error.code !== "42P01") throw standingsResult.error;
+        const teamsResult = await supabase.from("teams").delete().in("id", batch);
+        if (teamsResult.error) throw teamsResult.error;
+      }
+      await loadAll();
+      notify(`${ids.length} takım silindi. Seçtiğin altı ligdeki takımlar korundu.`);
+    } catch (error: any) {
+      notify("Takım temizliği tamamlanamadı: " + (error?.message || "Bilinmeyen hata"));
+      await loadAll();
+    } finally {
+      setLoading(false);
+    }
+  };
   const editLeague=(x:League)=>setLeagueForm({id:String(x.id),name:x.name,country:x.country||"",season:x.season||"",logo_url:x.logo_url||"",is_active:x.is_active!==false});
   const editTeam=(x:Team)=>setTeamForm({id:String(x.id),name:x.name,short_name:x.short_name||"",country:x.country||"",logo_url:x.logo_url||"",league_id:x.league_id?String(x.league_id):"",stadium:x.stadium||"",is_active:x.is_active!==false});
   const editStanding=(x:Standing)=>setStandingForm({id:String(x.id),league_id:String(x.league_id),team_id:String(x.team_id),standing_position:x.standing_position==null?"":String(x.standing_position),played:String(x.played||0),wins:String(x.wins||0),draws:String(x.draws||0),losses:String(x.losses||0),goals_for:String(x.goals_for||0),goals_against:String(x.goals_against||0),goal_difference:String(x.goal_difference||0),points:String(x.points||0),season:x.season||""});
-  const loadLive=(id:string)=>{setSelectedMatch(id);const m=matches.find(x=>String(x.id)===id);if(m)setLiveForm({minute:String(m.live_minute??0),second:String(m.live_second??0),period:m.live_period||"1",running:!!m.live_is_running})};
-  const saveLive=async()=>{if(!selectedMatch)return;const minute=Math.max(0,Number(liveForm.minute)||0);const second=Math.min(59,Math.max(0,Number(liveForm.second)||0));const payload={live_minute:minute,live_second:second,live_period:liveForm.period,live_is_running:liveForm.running};const {error}=await supabase.from("Matches").update(payload).eq("id",Number(selectedMatch));if(error)notify(error.message);else{notify("Canlı zaman güncellendi");await loadAll()}};
-  const resetLive=async()=>{setLiveForm({minute:"0",second:"0",period:"1",running:false});if(selectedMatch)await supabase.from("Matches").update({live_minute:0,live_second:0,live_period:"1",live_is_running:false}).eq("id",Number(selectedMatch));await loadAll();notify("Canlı zaman sıfırlandı")};
+  const loadLive=(id:string)=>{setSelectedMatch(id);const m=matches.find(x=>String(x.id)===id);if(m)setLiveForm({minute:String(m.live_minute??0),second:String(m.live_second??0),period:m.live_period||"1",running:!!m.live_is_running,home_team:m.home_team||"",away_team:m.away_team||""})};
+  const saveLive=async()=>{if(!selectedMatch)return;const minute=Math.max(0,Number(liveForm.minute)||0);const second=Math.min(59,Math.max(0,Number(liveForm.second)||0));const now=new Date().toISOString();const isRunning=liveForm.running && liveForm.period!=="HT" && liveForm.period!=="FT";const payload={home_team:liveForm.home_team.trim(),away_team:liveForm.away_team.trim(),live_minute:minute,live_second:second,live_period:liveForm.period,live_is_running:isRunning,live_started_at:isRunning?now:null,status:liveForm.period==="FT"?"finished":liveForm.period==="HT"?"halftime":"live"};if(!payload.home_team||!payload.away_team)return notify("İki takım adını da gir.");const {error}=await supabase.from("Matches").update(payload).eq("id",Number(selectedMatch));if(error)notify("Kaydedilemedi: "+error.message);else{notify("Takımlar ve canlı zaman kaydedildi");await loadAll()}};
+  const resetLive=async()=>{setLiveForm(x=>({...x,minute:"0",second:"0",period:"1",running:false}));if(selectedMatch)await supabase.from("Matches").update({live_minute:0,live_second:0,live_period:"1",live_is_running:false,live_started_at:null,status:"scheduled"}).eq("id",Number(selectedMatch));await loadAll();notify("Canlı zaman sıfırlandı")};
 
   const uploadCareerLogoStandalone=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith("image/"))return notify("Lütfen bir logo görseli seç.");if(file.size>5*1024*1024)return notify("Logo en fazla 5 MB olabilir.");setCareerLogoUploading(true);const ext=file.name.split(".").pop()?.toLowerCase()||"png";const path=`team-logos/career-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;const {error}=await supabase.storage.from("team-logos").upload(path,file,{upsert:false,contentType:file.type});if(error){setCareerLogoUploading(false);return notify("Logo yüklenemedi.");}const {data:{publicUrl}}=supabase.storage.from("team-logos").getPublicUrl(path);setCareerForm(x=>({...x,team_logo_url:publicUrl}));setCareerLogoUploading(false);};
   const addCareer=async()=>{const playerId=Number(careerPlayerId);const teamName=careerForm.team_name.trim();const vals=[careerForm.matches,careerForm.goals,careerForm.assists].map(Number);if(!playerId)return notify("Oyuncu seç.");if(!teamName)return notify("Takım adı zorunlu.");if(vals.some(v=>!Number.isInteger(v)||v<0))return notify("Maç, gol ve asist 0 veya daha büyük tam sayı olmalı.");setCareerSaving(true);const {error}=await supabase.from("player_career").insert({player_id:playerId,team_name:teamName,team_logo_url:careerForm.team_logo_url.trim()||null,start_date:careerForm.start_date||null,end_date:careerForm.end_date||null,matches:vals[0],goals:vals[1],assists:vals[2],achievements:careerForm.achievements.trim()||null,notes:careerForm.notes.trim()||null});setCareerSaving(false);if(error)return notify("Kariyer kaydedilemedi: "+error.message);setCareerForm({team_name:"",team_logo_url:"",start_date:"",end_date:"",matches:"0",goals:"0",assists:"0",achievements:"",notes:""});setCareerPlayerId("");await loadAll();notify("Kariyer kaydı eklendi.");};
@@ -2657,13 +2870,19 @@ function FootballDataManager() {
       </div>}
       {tab==="teams"&&<div className="grid gap-5 lg:grid-cols-[360px_1fr]">
         <form onSubmit={saveTeam} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 className="font-black text-[#0f2747]">{teamForm.id?"Takımı Düzenle":"Yeni Takım"}</h3><Field label="Takım adı"><input required value={teamForm.name} onChange={e=>setTeamForm({...teamForm,name:e.target.value})} className={inputClass}/></Field><Field label="Kısa ad"><input value={teamForm.short_name} onChange={e=>setTeamForm({...teamForm,short_name:e.target.value})} className={inputClass}/></Field><div className="grid grid-cols-2 gap-3"><Field label="Ülke"><input value={teamForm.country} onChange={e=>setTeamForm({...teamForm,country:e.target.value})} className={inputClass}/></Field><Field label="Stadyum"><input value={teamForm.stadium} onChange={e=>setTeamForm({...teamForm,stadium:e.target.value})} className={inputClass}/></Field></div><Field label="Lig"><select value={teamForm.league_id} onChange={e=>setTeamForm({...teamForm,league_id:e.target.value})} className={inputClass}><option value="">Lig seç</option>{leagues.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field><Field label="Logo URL"><input value={teamForm.logo_url} onChange={e=>setTeamForm({...teamForm,logo_url:e.target.value})} className={inputClass} placeholder="İstersen URL de girebilirsin"/></Field><div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 p-3"><p className="mb-2 text-xs font-extrabold text-[#0f2747]">⚽ Takım logosu</p>{teamForm.logo_url&&<img src={teamForm.logo_url} alt="Takım logosu" className="mb-3 h-16 w-16 rounded-xl bg-white object-contain p-2 shadow-sm"/>}<label className="inline-flex cursor-pointer items-center rounded-xl bg-[#0f2747] px-4 py-2.5 text-xs font-extrabold text-white">📁 Bilgisayardan logo seç<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={e=>void uploadAdminLogo(e,"team")} className="hidden"/></label></div><button disabled={loading} className="w-full rounded-xl bg-[#0f2747] px-4 py-3 text-xs font-extrabold text-white">{teamForm.id?"Güncelle":"Takım Ekle"}</button></form>
-        <div className="grid gap-2 sm:grid-cols-2">{teams.map(x=><div key={x.id} className="rounded-2xl border border-slate-200 p-3"><div className="flex items-center gap-3">{x.logo_url?<img src={x.logo_url} className="h-12 w-12 rounded-xl object-contain"/>:<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100">⚽</div>}<div className="min-w-0"><p className="truncate text-sm font-black">{x.name}</p><p className="text-[10px] font-semibold text-slate-400">{x.country||"-"} · {x.league_id?leagueName(x.league_id):"Lig yok"}</p></div></div><div className="mt-3 flex gap-2"><button type="button" onClick={()=>editTeam(x)} className="flex-1 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">Düzenle</button><button type="button" onClick={()=>deleteRow("teams",x.id)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">Sil</button></div></div>)}</div>
+        <div className="space-y-3">
+          <div className="flex flex-col gap-2 rounded-2xl border border-red-200 bg-red-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="text-sm font-black text-red-800">Altı lig dışındaki takımları temizle</p><p className="mt-1 text-xs font-semibold text-red-700">Süper Lig, Bundesliga, Premier League, Eredivisie, La Liga ve Ligue 1 takımları korunur.</p></div>
+            <button type="button" disabled={loading} onClick={() => void cleanupTeamsOutsideSixLeagues()} className="shrink-0 rounded-xl bg-red-600 px-4 py-3 text-xs font-extrabold text-white disabled:opacity-50">{loading ? "İşleniyor..." : "Diğer takımları sil"}</button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">{teams.map(x=><div key={x.id} className="rounded-2xl border border-slate-200 p-3"><div className="flex items-center gap-3">{x.logo_url?<img src={x.logo_url} className="h-12 w-12 rounded-xl object-contain"/>:<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100">⚽</div>}<div className="min-w-0"><p className="truncate text-sm font-black">{x.name}</p><p className="text-[10px] font-semibold text-slate-400">{x.country||"-"} · {x.league_id?leagueName(x.league_id):"Lig yok"}</p></div></div><div className="mt-3 flex gap-2"><button type="button" onClick={()=>editTeam(x)} className="flex-1 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">Düzenle</button><button type="button" onClick={()=>deleteRow("teams",x.id)} className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">Sil</button></div></div>)}</div>
+        </div>
       </div>}
       {tab==="standings"&&<div className="grid gap-5 lg:grid-cols-[400px_1fr]">
         <form onSubmit={saveStanding} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 className="font-black text-[#0f2747]">Manuel Puan Durumu</h3><div className="grid grid-cols-2 gap-3"><Field label="Lig"><select required value={standingForm.league_id} onChange={e=>setStandingForm({...standingForm,league_id:e.target.value})} className={inputClass}><option value="">Seç</option>{leagues.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field><Field label="Takım"><select required value={standingForm.team_id} onChange={e=>setStandingForm({...standingForm,team_id:e.target.value})} className={inputClass}><option value="">Seç</option>{teams.filter(t=>!standingForm.league_id||t.league_id===Number(standingForm.league_id)).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></Field></div><div className="grid grid-cols-4 gap-2">{[["standing_position","Sıra"],["played","O"],["wins","G"],["draws","B"],["losses","M"],["goals_for","AG"],["goals_against","YG"],["goal_difference","AV"],["points","P"]].map(([k,l])=><Field key={k} label={l}><input type="number" value={(standingForm as any)[k]} onChange={e=>setStandingForm({...standingForm,[k]:e.target.value})} className={inputClass}/></Field>)}</div><Field label="Sezon"><input value={standingForm.season} onChange={e=>setStandingForm({...standingForm,season:e.target.value})} className={inputClass}/></Field><button disabled={loading} className="w-full rounded-xl bg-[#0f2747] px-4 py-3 text-xs font-extrabold text-white">{standingForm.id?"Güncelle":"Kaydet"}</button></form>
         <div className="overflow-x-auto rounded-2xl border border-slate-200"><table className="w-full min-w-[820px] text-left text-xs"><thead className="bg-[#0f2747] text-white"><tr>{["#","Takım","O","G","B","M","AG","YG","AV","P",""].map(h=><th key={h} className="px-3 py-3 font-extrabold">{h}</th>)}</tr></thead><tbody>{[...standings].sort((a,b)=>(a.standing_position??999)-(b.standing_position??999)).map(x=><tr key={x.id} className="border-b border-slate-100"><td className="px-3 py-3 font-black text-slate-900">{x.standing_position??"-"}</td><td className="px-3 py-3 font-black text-slate-900">{teamName(x.team_id)}</td><td className="px-3 text-slate-900">{x.played}</td><td className="px-3 text-slate-900">{x.wins}</td><td className="px-3 text-slate-900">{x.draws}</td><td className="px-3 text-slate-900">{x.losses}</td><td className="px-3 text-slate-900">{x.goals_for}</td><td className="px-3 text-slate-900">{x.goals_against}</td><td className="px-3 text-slate-900">{x.goal_difference}</td><td className="px-3 font-black text-slate-900">{x.points}</td><td className="px-3"><div className="flex gap-1"><button type="button" onClick={()=>editStanding(x)} className="rounded bg-blue-50 px-2 py-1 font-bold text-blue-700">Düzenle</button><button type="button" onClick={()=>deleteRow("league_standings",x.id)} className="rounded bg-red-50 px-2 py-1 font-bold text-red-600">Sil</button></div></td></tr>)}</tbody></table>{!standings.length&&<Empty text="Puan durumu kaydı yok."/>}</div>
       </div>}
-      {tab==="live"&&<div className="grid gap-5 lg:grid-cols-[1fr_360px]"><div className="space-y-2">{matches.map(m=><button type="button" key={m.id} onClick={()=>loadLive(String(m.id))} className={`w-full rounded-2xl border p-4 text-left transition ${selectedMatch===String(m.id)?"border-blue-500 bg-blue-50":"border-slate-200 bg-white hover:bg-slate-50"}`}><div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-slate-400">#{m.id} · {m.league||"Lig yok"}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black">{m.status||"-"}</span></div><div className="mt-3 flex items-center justify-between gap-3"><span className="flex-1 text-sm font-black">{m.home_team}</span><strong className="text-xl text-[#0f2747]">{m.home_score??0} - {m.away_score??0}</strong><span className="flex-1 text-right text-sm font-black">{m.away_team}</span></div><p className="mt-2 text-center text-xs font-black text-blue-600">{m.live_minute??0}:{String(m.live_second??0).padStart(2,"0")} · {m.live_period||"1"}. yarı</p></button>)}</div><div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 className="font-black text-[#0f2747]">⏱️ Admin canlı zaman</h3><p className="mt-1 text-[11px] font-semibold text-slate-400">Admin dakika + saniye görür. Kullanıcı tarafına saniye gönderilmemelidir.</p><Field label="Maç"><select value={selectedMatch} onChange={e=>loadLive(e.target.value)} className={inputClass}><option value="">Maç seç</option>{matches.map(m=><option key={m.id} value={m.id}>{m.home_team} - {m.away_team}</option>)}</select></Field><div className="mt-3 grid grid-cols-2 gap-3"><Field label="Dakika"><input type="number" min="0" value={liveForm.minute} onChange={e=>setLiveForm({...liveForm,minute:e.target.value})} className={inputClass}/></Field><Field label="Saniye"><input type="number" min="0" max="59" value={liveForm.second} onChange={e=>setLiveForm({...liveForm,second:e.target.value})} className={inputClass}/></Field></div><Field label="Dönem"><select value={liveForm.period} onChange={e=>setLiveForm({...liveForm,period:e.target.value})} className={inputClass}><option value="1">1. yarı</option><option value="HT">Devre arası</option><option value="2">2. yarı</option><option value="FT">Maç bitti</option></select></Field><label className="mt-3 flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={liveForm.running} onChange={e=>setLiveForm({...liveForm,running:e.target.checked})}/> Sayaç çalışıyor</label><div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={()=>setLiveForm({...liveForm,running:true})} className="rounded-xl bg-emerald-600 px-3 py-3 text-xs font-extrabold text-white">▶ Başlat</button><button type="button" onClick={()=>setLiveForm({...liveForm,running:false})} className="rounded-xl bg-amber-500 px-3 py-3 text-xs font-extrabold text-white">⏸ Durdur</button><button type="button" onClick={saveLive} className="rounded-xl bg-[#0f2747] px-3 py-3 text-xs font-extrabold text-white">💾 Kaydet</button><button type="button" onClick={resetLive} className="rounded-xl bg-slate-700 px-3 py-3 text-xs font-extrabold text-white">↺ Sıfırla</button></div></div></div>}
+      {tab==="live"&&<div className="grid gap-5 lg:grid-cols-[1fr_360px]"><div className="space-y-2">{matches.map(m=><button type="button" key={m.id} onClick={()=>loadLive(String(m.id))} className={`w-full rounded-2xl border p-4 text-left transition ${selectedMatch===String(m.id)?"border-blue-500 bg-blue-50":"border-slate-200 bg-white hover:bg-slate-50"}`}><div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-slate-400">#{m.id} · {m.league||"Lig yok"}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black">{m.status||"-"}</span></div><div className="mt-3 flex items-center justify-between gap-3"><span className="flex-1 text-sm font-black">{m.home_team}</span><strong className="text-xl text-[#0f2747]">{m.home_score??0} - {m.away_score??0}</strong><span className="flex-1 text-right text-sm font-black">{m.away_team}</span></div><p className="mt-2 text-center text-xs font-black text-blue-600">{m.live_minute??0}:{String(m.live_second??0).padStart(2,"0")} · {m.live_period==="HT"?"Devre arası":m.live_period==="FT"?"Maç sonu":m.live_period==="2"?"2. yarı":"1. yarı"}</p></button>)}</div><div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 className="font-black text-[#0f2747]">⏱️ Admin canlı zaman</h3><p className="mt-1 text-[11px] font-semibold text-slate-500">Takım adları, dakika, saniye ve devre bilgisi kullanıcıdaki maç kartına ve maç detayına yansır.</p><Field label="Maç"><select value={selectedMatch} onChange={e=>loadLive(e.target.value)} className={inputClass}><option value="">Maç seç</option>{matches.map(m=><option key={m.id} value={m.id}>{m.home_team} - {m.away_team}</option>)}</select></Field><div className="mt-3 grid grid-cols-2 gap-3"><Field label="Ev sahibi takım adı"><input value={liveForm.home_team} onChange={e=>setLiveForm({...liveForm,home_team:e.target.value})} className={inputClass} /></Field><Field label="Deplasman takım adı"><input value={liveForm.away_team} onChange={e=>setLiveForm({...liveForm,away_team:e.target.value})} className={inputClass} /></Field></div><div className="mt-3 grid grid-cols-2 gap-3"><Field label="Dakika"><input type="number" min="0" value={liveForm.minute} onChange={e=>setLiveForm({...liveForm,minute:e.target.value})} className={inputClass}/></Field><Field label="Saniye"><input type="number" min="0" max="59" value={liveForm.second} onChange={e=>setLiveForm({...liveForm,second:e.target.value})} className={inputClass}/></Field></div><Field label="Dönem"><select value={liveForm.period} onChange={e=>setLiveForm({...liveForm,period:e.target.value})} className={inputClass}><option value="1">1. yarı</option><option value="HT">Devre arası</option><option value="2">2. yarı</option><option value="FT">Maç bitti</option></select></Field><label className="mt-3 flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={liveForm.running} onChange={e=>setLiveForm({...liveForm,running:e.target.checked})}/> Sayaç çalışıyor</label><div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={()=>setLiveForm({...liveForm,running:true})} className="rounded-xl bg-emerald-600 px-3 py-3 text-xs font-extrabold text-white">▶ Başlat</button><button type="button" onClick={()=>setLiveForm({...liveForm,running:false})} className="rounded-xl bg-amber-500 px-3 py-3 text-xs font-extrabold text-white">⏸ Durdur</button><button type="button" onClick={saveLive} className="rounded-xl bg-[#0f2747] px-3 py-3 text-xs font-extrabold text-white">💾 Kaydet</button><button type="button" onClick={resetLive} className="rounded-xl bg-slate-700 px-3 py-3 text-xs font-extrabold text-white">↺ Sıfırla</button></div></div></div>}
       {tab==="career"&&<div className="space-y-5">
   <div className="rounded-2xl border border-slate-200 bg-white p-5">
     <h3 className="text-base font-black text-[#0f2747]">👤 Oyuncu Kariyeri</h3>

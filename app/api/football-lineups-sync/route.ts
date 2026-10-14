@@ -1,14 +1,14 @@
 ﻿import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const API_URL = "https://v3.football.api-sports.io";
+const API_URL = "https://sportapi.ai/api";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SECRET_KEY!
 );
 
-const API_KEY = process.env.API_FOOTBALL_KEY!;
+const API_KEY = process.env.SPORTAPI_API_KEY!;
 
 const LIVE_STATUSES = new Set([
   "1H",
@@ -53,6 +53,7 @@ type ApiLineup = {
 type MatchRow = {
   id: number;
   api_fixture_id: number | null;
+  sportapi_fixture_id: number | null;
   status: string | null;
   home_team_id: number | null;
   away_team_id: number | null;
@@ -76,33 +77,113 @@ function normalizePosition(
   return position;
 }
 
-async function fetchLineups(fixtureId: number) {
+async function fetchLineups(
+  fixtureId: number,
+  homeTeam: string | null,
+  awayTeam: string | null
+) {
   const response = await fetch(
-    `${API_URL}/fixtures/lineups?fixture=${fixtureId}`,
+    `${API_URL}/fixtures/${fixtureId}/lineups`,
     {
       method: "GET",
-      headers: {
-        "x-apisports-key": API_KEY,
-      },
+      headers: { "X-Api-Key": API_KEY },
       cache: "no-store",
     }
   );
 
   if (response.status === 429) {
-    throw new Error("HTTP 429");
+    throw new Error("RATE_LIMIT_429");
   }
 
   if (!response.ok) {
     throw new Error(
-      `API lineups ${fixtureId}: HTTP ${response.status}`
+      `SportAPI lineups ${fixtureId}: HTTP ${response.status}`
     );
   }
 
-  return (await response.json()) as {
-    response?: ApiLineup[];
+  type SportPlayer = {
+    name?: string;
+    position?: string;
+    shirt?: number | null;
+  };
+
+  type SportTeamLineup = {
+    starters?: SportPlayer[];
+    subs?: SportPlayer[];
+  };
+
+  const payload = (await response.json()) as {
+    success?: boolean;
+    available?: boolean;
+    data?: {
+      home?: SportTeamLineup;
+      away?: SportTeamLineup;
+    } | null;
+  };
+
+  if (
+    payload.available !== true ||
+    !payload.data?.home ||
+    !payload.data?.away
+  ) {
+    return {
+      success: payload.success,
+      available: payload.available,
+      data: [] as ApiLineup[],
+    };
+  }
+
+  function makePlayer(
+    player: SportPlayer,
+    teamName: string | null
+  ): ApiPlayer {
+    const stableText =
+      `${(teamName || "").trim().toLocaleLowerCase("en-US")}:` +
+      `${(player.name || "").trim().toLocaleLowerCase("en-US")}`;
+
+    let hash = 2166136261;
+
+    for (let i = 0; i < stableText.length; i++) {
+      hash = Math.imul(hash ^ stableText.charCodeAt(i), 16777619) >>> 0;
+    }
+
+    return {
+      id: -((hash % 2000000000) + 1),
+      name: player.name,
+      number: player.shirt ?? null,
+      pos: player.position ?? null,
+      photo: null,
+    };
+  }
+
+  function convertTeam(
+    side: "home" | "away",
+    teamName: string | null,
+    source: SportTeamLineup
+  ): ApiLineup {
+    return {
+      team: {
+        name: teamName || (side === "home" ? "home" : "away"),
+      },
+      formation: null,
+      startXI: (source.starters || []).map((player) => ({
+        player: makePlayer(player, teamName),
+      })),
+      substitutes: (source.subs || []).map((player) => ({
+        player: makePlayer(player, teamName),
+      })),
+    };
+  }
+
+  return {
+    success: payload.success,
+    available: payload.available,
+    data: [
+      convertTeam("home", homeTeam, payload.data.home),
+      convertTeam("away", awayTeam, payload.data.away),
+    ] as ApiLineup[],
   };
 }
-
 async function fetchLineupsBatch(fixtureIds: number[]) {
   if (fixtureIds.length === 0) {
     return [];
@@ -195,7 +276,7 @@ async function savePlayer(
 
     if (updated.error) {
       throw new Error(
-        `Oyuncu gÃ¼ncelleme: ${updated.error.message}`
+        `Oyuncu gÃƒÂ¼ncelleme: ${updated.error.message}`
       );
     }
 
@@ -229,20 +310,12 @@ async function saveLineup(
   const teamName = lineup.team?.name || null;
   const teamLogo = lineup.team?.logo || null;
 
-  if (!apiTeamId) {
-    return {
-      starting: 0,
-      substitutes: 0,
-      team: null,
-    };
-  }
-
-  const homeById =
-    Number(match.home_team_id) ===
+const homeById =
+    apiTeamId !== null && Number(match.home_team_id) ===
     Number(apiTeamId);
 
   const awayById =
-    Number(match.away_team_id) ===
+    apiTeamId !== null && Number(match.away_team_id) ===
     Number(apiTeamId);
 
   const homeByName =
@@ -320,7 +393,7 @@ async function saveLineup(
 
     if (result.error) {
       throw new Error(
-        `Ä°lk 11 kayÄ±t: ${result.error.message}`
+        `Ã„Â°lk 11 kayÃ„Â±t: ${result.error.message}`
       );
     }
 
@@ -359,7 +432,7 @@ async function saveLineup(
 
     if (result.error) {
       throw new Error(
-        `Yedek kayÄ±t: ${result.error.message}`
+        `Yedek kayÃ„Â±t: ${result.error.message}`
       );
     }
 
@@ -374,13 +447,20 @@ async function saveLineup(
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 500 });
+  }
+  if (request.headers.get("authorization") !== "Bearer " + secret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     if (!API_KEY) {
       return NextResponse.json(
         {
           ok: false,
-          error: "API_FOOTBALL_KEY bulunamadÄ±.",
+          error: "SPORTAPI_API_KEY bulunamadı.",
         },
         { status: 500 }
       );
@@ -389,9 +469,9 @@ export async function GET() {
     const matchesResult = await supabase
       .from("Matches")
       .select(
-        "id,api_fixture_id,status,home_team_id,away_team_id,home_team,away_team"
+        "id,api_fixture_id,sportapi_fixture_id,status,home_team_id,away_team_id,home_team,away_team,kickoff"
       )
-      .not("api_fixture_id", "is", null)
+      .not("sportapi_fixture_id", "is", null)
       .order("kickoff", {
         ascending: true,
       });
@@ -409,21 +489,25 @@ export async function GET() {
     const matches =
       (matchesResult.data || []) as MatchRow[];
 
-    const eligibleMatches = matches.filter(
-      (match) => {
-        const status = String(
-          match.status || ""
-        ).toUpperCase();
+    const eligibleMatches = matches.filter((match) => {
+      const status = String(match.status || "").toUpperCase();
+      const kickoffTime = match.kickoff
+        ? new Date(match.kickoff).getTime()
+        : NaN;
+      const isUpcoming =
+        Number.isFinite(kickoffTime) &&
+        kickoffTime >= Date.now() &&
+        !["PST", "CANC", "ABD", "AWD", "WO"].includes(status);
 
-        return (
-          LIVE_STATUSES.has(status) ||
-          FINISHED_STATUSES.has(status)
-        );
-      }
-    );
+      return (
+        LIVE_STATUSES.has(status) ||
+        FINISHED_STATUSES.has(status) ||
+        isUpcoming
+      );
+    });
 
     /*
-     * Daha Ã¶nce kadrosu kaydedilmiÅŸ maÃ§larÄ± bul.
+     * Daha ÃƒÂ¶nce kadrosu kaydedilmiÃ…Å¸ maÃƒÂ§larÃ„Â± bul.
      */
     const lineupMatchIds = new Set<number>();
 
@@ -459,7 +543,7 @@ export async function GET() {
     }
 
     /*
-     * Kadrosu olmayan maÃ§lar her zaman Ã¶nce iÅŸlenir.
+     * Kadrosu olmayan maÃƒÂ§lar her zaman ÃƒÂ¶nce iÃ…Å¸lenir.
      */
     const withoutLineups =
       eligibleMatches.filter(
@@ -474,12 +558,12 @@ export async function GET() {
       );
 
     /*
-     * Kadro senkronizasyonunda öncelik:
+     * Kadro senkronizasyonunda Ã¶ncelik:
      *
-     * 1. Canlı ve kadrosu olmayan maçlar
-     * 2. Başlamasına 90 dakika veya daha az kalan maçlar
-     * 3. Diğer kadrosuz maçlar
-     * 4. Kadrosu olan maçlar
+     * 1. CanlÄ± ve kadrosu olmayan maÃ§lar
+     * 2. BaÅŸlamasÄ±na 90 dakika veya daha az kalan maÃ§lar
+     * 3. DiÄŸer kadrosuz maÃ§lar
+     * 4. Kadrosu olan maÃ§lar
      */
     const now = Date.now();
 
@@ -556,20 +640,21 @@ const errors: string[] = [];
 for (const match of selectedMatches) {
   try {
     const fixtureId =
-      Number(match.api_fixture_id);
+      Number(match.sportapi_fixture_id);
 
     if (!fixtureId) {
       continue;
     }
 
     const lineupData =
-      await fetchLineups(fixtureId);
+      await fetchLineups(fixtureId, match.home_team, match.away_team);
 
-    const lineups =
-      Array.isArray(lineupData.response)
-        ? lineupData.response
-        : [];
-
+    const lineups: ApiLineup[] =
+      lineupData.available === false
+        ? []
+        : Array.isArray(lineupData.data)
+          ? lineupData.data
+          : [];
     matchesProcessed++;
 
     if (lineups.length === 0) {
@@ -689,6 +774,11 @@ return NextResponse.json({
     );
   }
 }
+
+
+
+
+
 
 
 

@@ -1,8 +1,13 @@
-﻿"use client";
+"use client";
+import Link from "next/link";
 
 import { useEffect, useState } from "react";
 
 import { supabase } from "../lib/supabase";
+import {
+  isMatchStatusPredictable,
+  isPredictionWindowOpen,
+} from "../lib/match-predictions";
 
 type Match = {
   id: number;
@@ -21,6 +26,9 @@ type Match = {
   schedule_confirmed: boolean;
   home_logo_url: string | null;
   away_logo_url: string | null;
+  featured_on_home?: boolean | null;
+  card_background_color?: string | null;
+  league_logo_url?: string | null;
 
   broadcaster?: string | null;
   broadcast_channel?: string | null;
@@ -482,7 +490,18 @@ export default function HomePage() {
       console.error("match_lineups yüklenemedi:", matchLineupsResult.error);
     }
 
-    setMatches((matchesResult.data || []) as Match[]);
+    // Admin panelinden eklenen maçlar özel veya yeni lig isimlerine sahip olabilir.
+    // Sabit lig beyaz listesi bu maçları sessizce ana sayfadan kaldırıyordu.
+    // Maçları lig adına göre filtrelemeden yükle; yalnızca iki takım adı da boş olan
+    // bozuk kayıtları dışarıda bırak. Böylece admin paneli ile ana sayfa aynı veriyi kullanır.
+    const allValidMatches = ((matchesResult.data || []) as Match[]).filter((match) =>
+      Boolean(String(match.home_team || "").trim()) &&
+      Boolean(String(match.away_team || "").trim())
+    );
+    if (matchesResult.error) {
+      console.error("Maçlar yüklenemedi:", matchesResult.error);
+    }
+    setMatches(allValidMatches);
     setMatchEvents((matchEventsResult.data || []) as MatchEvent[]);
     setPlayers((playersResult.data || []) as Player[]);
     setMatchLineups((matchLineupsResult.data || []) as MatchLineup[]);
@@ -528,22 +547,11 @@ export default function HomePage() {
   };
 
   const isPredictionOpen = (match: Match) => {
-    if (
-      match.status === "finished" ||
-      match.status === "cancelled" ||
-      match.status === "live" ||
-      match.status === "halftime" ||
-      !match.schedule_confirmed ||
-      !match.kickoff
-    ) return false;
-
-    const kickoff = new Date(match.kickoff);
-    const kickoffMs = kickoff.getTime();
-    if (!Number.isFinite(kickoffMs)) return false;
-
-    const matchDayStart = new Date(kickoff.getFullYear(), kickoff.getMonth(), kickoff.getDate(), 0, 0, 0, 0).getTime();
-    const predictionClose = kickoffMs - 10 * 60 * 1000;
-    return currentTime >= matchDayStart && currentTime < predictionClose;
+    return (
+      match.schedule_confirmed &&
+      isMatchStatusPredictable(match.status) &&
+      isPredictionWindowOpen(match.kickoff, currentTime)
+    );
   };
 
   const getLiveScoreText = (match: Match) =>
@@ -691,7 +699,7 @@ export default function HomePage() {
           schema: "public",
           table: "Matches",
         },
-        (payload) => {
+        (payload: any) => {
           if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
             const nextMatch = payload.new as Partial<Match> & { id?: number };
             if (nextMatch.id != null) {
@@ -723,7 +731,7 @@ export default function HomePage() {
           schema: "public",
           table: "MatchEvents",
         },
-        (payload) => {
+        (payload: any) => {
           if (payload.eventType === "INSERT") {
             setMatchEvents((current) => {
               const incoming = payload.new as MatchEvent;
@@ -763,7 +771,7 @@ export default function HomePage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "match_lineups" },
-        (payload) => {
+        (payload: any) => {
           if (payload.eventType === "INSERT") {
             const incoming = payload.new as MatchLineup;
             setMatchLineups((current) =>
@@ -1369,10 +1377,10 @@ export default function HomePage() {
     if (url) {
       return (
         <div
-          className={`flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm ${
+          className={`flex shrink-0 items-center justify-center ${
             small
-              ? "h-8 w-8 p-1"
-              : "h-16 w-16 p-2 sm:h-20 sm:w-20"
+              ? "h-9 w-9 p-0.5"
+              : "h-20 w-20 p-0 sm:h-24 sm:w-24"
           }`}
         >
           <img
@@ -1386,10 +1394,10 @@ export default function HomePage() {
 
     return (
       <div
-        className={`flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 font-bold text-slate-400 shadow-sm ${
+        className={`flex shrink-0 items-center justify-center font-black text-slate-500 ${
           small
-            ? "h-8 w-8 text-xs"
-            : "h-16 w-16 text-xl sm:h-20 sm:w-20"
+            ? "h-9 w-9 text-xs"
+            : "h-20 w-20 text-xl sm:h-24 sm:w-24"
         }`}
       >
         {getTeamInitial(team)}
@@ -1527,7 +1535,7 @@ export default function HomePage() {
     };
   };
 
-  const filteredMatches = (selectedDate === "all"
+  const filteredMatchesUnsorted = (selectedDate === "all"
     ? baseFilteredMatches
     : baseFilteredMatches.filter(
         (match) => getMatchDateKey(match) === selectedDate
@@ -1537,6 +1545,14 @@ export default function HomePage() {
     const teamText = `${match.home_team || ""} ${match.away_team || ""}`.toLocaleLowerCase("tr-TR");
     const teamOk = !teamSearch.trim() || teamText.includes(teamSearch.trim().toLocaleLowerCase("tr-TR"));
     return leagueOk && teamOk;
+  });
+
+  const filteredMatches = [...filteredMatchesUnsorted].sort((a, b) => {
+    const featuredDiff = Number(Boolean(b.featured_on_home)) - Number(Boolean(a.featured_on_home));
+    if (featuredDiff !== 0) return featuredDiff;
+    const aTime = a.kickoff ? new Date(a.kickoff).getTime() : Number.MAX_SAFE_INTEGER;
+    const bTime = b.kickoff ? new Date(b.kickoff).getTime() : Number.MAX_SAFE_INTEGER;
+    return aTime - bTime;
   });
 
   const confirmedUpcoming = upcomingMatches.filter(
@@ -1558,7 +1574,19 @@ export default function HomePage() {
     {} as Record<string, Match[]>
   );
 
-  const leagueGroups = Object.entries(groupedMatches);
+  const featuredMatches = filteredMatches.filter((match) => Boolean(match.featured_on_home));
+  const homeSpotlightMatches = [
+    ...matches.filter((match) => match.status === "live" || match.status === "halftime"),
+    ...filteredMatches.filter((match) => match.status !== "finished" && match.status !== "cancelled"),
+  ]
+    .filter((match, index, allMatches) => allMatches.findIndex((candidate) => candidate.id === match.id) === index)
+    .slice(0, 3);
+  const leagueGroups: [string, Match[]][] = [
+    ...(featuredMatches.length ? [["★ Öne Çıkan Maçlar", featuredMatches] as [string, Match[]]] : []),
+    ...Object.entries(groupedMatches)
+      .map(([league, group]) => [league, group.filter((match) => !match.featured_on_home)] as [string, Match[]])
+      .filter(([, group]) => group.length > 0),
+  ];
 
   if (loading) {
     return (
@@ -2214,6 +2242,30 @@ export default function HomePage() {
 
         /* SKOR DURAĞI - maç kartları açık mavi / beyaz yazı */
         .match-card {
+          background: #ffffff !important;
+          color: #000000 !important;
+          border-color: #e5e7eb !important;
+          box-shadow: 0 12px 28px rgba(0,0,0,.08) !important;
+        }
+        .match-card::before {
+          background: transparent !important;
+        }
+        .match-card .text-\[\#0f2747\], .match-card .text-slate-500, .match-card .text-slate-400, .match-card .text-blue-600, .match-card .text-blue-700 {
+          color: #dc2626 !important;
+          font-weight: 800 !important;
+        }
+        .match-card .bg-white,
+        .match-card .bg-white\/70,
+        .match-card .bg-slate-50,
+        .match-card .bg-slate-50\/70,
+        .match-card .bg-blue-50\/50,
+        .match-card .bg-blue-50\/60,
+        .match-card .bg-blue-50\/70 {
+          background: #ffffff !important;
+          border-color: #e5e7eb !important;
+        }
+        /* legacy rule below kept unreachable by the stronger selector above */
+        .match-card-legacy {
           background: #9dccf2 !important;
           border-color: #82b9e8 !important;
           box-shadow: 0 16px 40px rgba(15,39,71,.10) !important;
@@ -2391,7 +2443,68 @@ export default function HomePage() {
 :global(body) .app-shell .public-standings-table thead * {
   color:#ffffff !important;
 }
-`}</style>
+        /* SKOR DURAGI yeni acik mac detayi ve olaylar stili */
+        .match-detail-page .space-y-2 > div.rounded-2xl,
+        .match-detail-page .space-y-2 > div.rounded-xl {
+          background: #ffffff !important;
+          border-color: #e5e7eb !important;
+          color: #000000 !important;
+          font-weight: 800 !important;
+        }
+        .match-detail-page .space-y-2 > div.rounded-2xl *,
+        .match-detail-page .space-y-2 > div.rounded-xl * {
+          color: #000000 !important;
+          font-weight: 800 !important;
+        }
+        .match-detail-page .text-white { color: #000000 !important; }
+        .match-detail-page .bg-white\/10 { background: #f3f4f6 !important; }
+        .match-detail-page .bg-white { background: #ffffff !important; }
+        .match-detail-page .text-white\/50 { color: #000000 !important; }
+
+        /* Menü: üç sütunlu mavi kutular, admin ve bildirimler tam genişlik */
+        :global(body) .skorium-sidebar .skor-menu-grid {
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          align-content: start !important;
+          gap: 8px !important;
+          overflow-y: auto !important;
+        }
+        :global(body) .skorium-sidebar .skor-menu-grid > button {
+          min-width: 0 !important;
+          min-height: 64px !important;
+          margin: 0 !important;
+          padding: 9px 5px !important;
+          display: flex !important;
+          flex-direction: column !important;
+          align-items: center !important;
+          justify-content: center !important;
+          gap: 5px !important;
+          border-radius: 12px !important;
+          background: #0000ff !important;
+          color: #ffffff !important;
+          text-align: center !important;
+          font-size: 11px !important;
+          font-weight: 900 !important;
+          line-height: 1.2 !important;
+          overflow-wrap: anywhere !important;
+        }
+        :global(body) .skorium-sidebar .skor-menu-grid > button span { color: #ffffff !important; font-weight: 900 !important; }
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-admin { grid-column: 1 / -1 !important; grid-row: 1 !important; min-height: 48px !important; flex-direction: row !important; }
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-notifications { grid-column: 1 / -1 !important; min-height: 48px !important; flex-direction: row !important; justify-content: space-between !important; }
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-standings,
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-player-stats,
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-theme { display: none !important; }
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-search { grid-column: auto !important; }
+        :global(body) .skorium-sidebar .skor-menu-grid > button.sidebar-admin { order: -1 !important; }
+        @media (max-width: 360px) {
+          :global(body) .skorium-sidebar .skor-menu-grid > button { min-height: 58px !important; font-size: 10px !important; padding: 7px 3px !important; }
+        }
+        /* Maç listesi: beyaz kart ve kalın kırmızı metin */
+        :global(body) .match-card { background: #ffffff !important; color: #dc2626 !important; border-color: #e5e7eb !important; }
+        :global(body) .match-card p, :global(body) .match-card span { color: #dc2626 !important; font-weight: 800 !important; }
+        :global(body) .match-card::before { background: transparent !important; }
+`}
+</style>
 
       {menuOpen && (
         <button
@@ -2449,14 +2562,14 @@ export default function HomePage() {
           </div>
         </div>
 
-        <nav className="flex-1 px-4 py-5">
+        <nav className="skor-menu-grid flex-1 px-4 py-5">
           <button
             type="button"
             onClick={() => goTo("/")}
             className="sidebar-nav-active mb-2 flex w-full items-center gap-3 px-4 py-3.5 text-left text-sm font-black"
           >
             <span>🏠</span>
-            <span>Ana Sayfa</span>
+            <span>Anasayfa</span>
           </button>
 
           <button
@@ -2465,7 +2578,7 @@ export default function HomePage() {
             className="sidebar-nav-item mb-2 flex w-full items-center gap-3 px-4 py-3.5 text-left text-sm font-bold transition"
           >
             <span>🎯</span>
-            <span>Tahminler</span>
+            <span>Tahmine açık maçlar</span>
           </button>
 
           <button
@@ -2474,7 +2587,7 @@ export default function HomePage() {
             className="sidebar-nav-item mb-2 flex w-full items-center gap-3 px-4 py-3.5 text-left text-sm font-bold transition"
           >
             <span>🏆</span>
-            <span>Sıralama</span>
+            <span>SKP Puan sıralaması</span>
           </button>
 
           <button
@@ -2498,7 +2611,7 @@ export default function HomePage() {
             setMenuOpen(false);
             if (userId) void loadNotifications(userId);
             setNotificationOpen(true);
-          }} className="mb-1 flex w-full items-center justify-between rounded-xl px-4 py-3.5 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50"><span className="flex items-center gap-3">🔔 <span>Bildirimler</span></span>{notifications.filter(n => !n.is_read).length > 0 && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-black text-white">{notifications.filter(n => !n.is_read).length}</span>}</button>
+          }} className="sidebar-notifications mb-1 flex w-full items-center justify-between rounded-xl px-4 py-3.5 text-left text-sm font-black transition"><span className="flex items-center gap-3">🔔 <span>Bildirimler</span></span>{notifications.filter(n => !n.is_read).length > 0 && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-black text-white">{notifications.filter(n => !n.is_read).length}</span>}</button>
 
           {profile.is_admin && (
             <button
@@ -2543,11 +2656,11 @@ export default function HomePage() {
 
               <div className="min-w-0">
                 <h1 className="page-title truncate text-base font-extrabold text-[#0f2747] sm:text-lg">
-                  FUTBOL TAHMİN
+                  SKOR DURAĞI
                 </h1>
 
                 <p className="truncate text-[9px] font-semibold uppercase tracking-wider text-blue-600">
-                  Tahmin platformu
+                  Futbol güncesi
                 </p>
               </div>
             </div>
@@ -2556,8 +2669,30 @@ export default function HomePage() {
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
+              onClick={() => setMenuPanel("search")}
+              aria-label="Lig, takım veya oyuncu ara"
+              className="home-header-icon"
+            >
+              <span aria-hidden="true">⌕</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (userId) void loadNotifications(userId);
+                setNotificationOpen(true);
+              }}
+              aria-label="Bildirimleri aç"
+              className="home-header-icon relative"
+            >
+              <span aria-hidden="true">🔔</span>
+              {notifications.filter((notification) => !notification.is_read).length > 0 && (
+                <span className="home-notification-dot" />
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => (window.location.href = "/tahmin")}
-              className="rounded-xl bg-blue-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 sm:px-4 sm:text-sm"
+              className="hidden rounded-xl bg-blue-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 sm:inline-flex sm:px-4 sm:text-sm"
             >
               🎯 Tahmin
             </button>
@@ -2600,139 +2735,284 @@ export default function HomePage() {
       </header>
 
       <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/95 px-2 pt-2 shadow-[0_-10px_35px_rgba(15,39,71,.08)] backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-md items-center justify-around">
-          <button type="button" onClick={() => goTo("/")} className="flex min-w-[68px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-extrabold text-[#0f2747]">
-            <span className="text-lg leading-none">🏠</span><span>Ana Sayfa</span>
+        <div className="mx-auto flex w-full max-w-lg items-center justify-around">
+          <button type="button" onClick={() => goTo("/")} className="flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] font-extrabold text-[#0f2747]">
+            <span className="text-lg leading-none">⌂</span><span>Ana Sayfa</span>
           </button>
-          <button type="button" onClick={() => goTo("/tahmin")} className="flex min-w-[68px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-extrabold text-blue-600">
-            <span className="text-lg leading-none">🎯</span><span>Tahmin</span>
+          <button type="button" onClick={() => document.getElementById("match-center")?.scrollIntoView({ behavior: "smooth" })} className="flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] font-extrabold text-slate-500">
+            <span className="text-lg leading-none">⚽</span><span>Maçlar</span>
           </button>
-          <button type="button" onClick={() => goTo("/siralama")} className="flex min-w-[68px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-extrabold text-slate-500">
-            <span className="text-lg leading-none">🏆</span><span>Sıralama</span>
+          <button type="button" onClick={() => document.getElementById("reward-wheel")?.scrollIntoView({ behavior: "smooth" })} className="flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] font-extrabold text-slate-500">
+            <span className="text-lg leading-none">✳</span><span>Çark</span>
           </button>
-          <button type="button" onClick={() => setProfileOpen(true)} className="flex min-w-[68px] flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-extrabold text-slate-500">
-            <span className="text-lg leading-none">👤</span><span>Profil</span>
+          <button type="button" onClick={() => goTo("/siralama")} className="flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] font-extrabold text-slate-500">
+            <span className="text-lg leading-none">▥</span><span>Puan</span>
+          </button>
+          <button type="button" onClick={() => setProfileOpen(true)} className="flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] font-extrabold text-slate-500">
+            <span className="text-lg leading-none">♙</span><span>Profil</span>
           </button>
         </div>
       </nav>
 
+      <style jsx global>{`
+        .app-shell { max-width: 1180px; }
+        .page-content-bottom { background: #f4f7fb; }
+        .hero-modern { background: linear-gradient(115deg, #071d36 0%, #0b3760 52%, #0d5b91 100%) !important; border-radius: 24px !important; box-shadow: 0 16px 36px rgba(7,29,54,.18); }
+        .modern-card, .date-strip { border-radius: 18px !important; box-shadow: 0 5px 18px rgba(20,45,75,.07); }
+        #match-center { scroll-margin-top: 88px; }
+        #match-center > * { min-width: 0; }
+        .match-featured-row { background: #fff8e7; }
+        .home-news-strip { margin: 3px 0 20px; }
+        .home-section-heading { display:flex; align-items:end; justify-content:space-between; gap:12px; margin:0 2px 12px; }
+        .home-section-kicker { margin:0; color:#748197; font-size:10px; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
+        .home-section-title { margin:4px 0 0; color:#142944; font-size:20px; font-weight:950; letter-spacing:-.04em; }
+        .home-news-track { display:grid; grid-auto-columns:minmax(245px, 1fr); grid-auto-flow:column; gap:12px; overflow-x:auto; padding:1px 1px 8px; scroll-snap-type:x mandatory; scrollbar-width:none; }
+        .home-news-track::-webkit-scrollbar { display:none; }
+        .home-news-card { position:relative; display:flex; min-height:148px; flex-direction:column; justify-content:space-between; overflow:hidden; padding:17px; border:1px solid rgba(255,255,255,.22); border-radius:21px; color:#fff!important; text-decoration:none; isolation:isolate; scroll-snap-align:start; box-shadow:0 12px 27px rgba(16,39,65,.13); }
+        .home-news-card::before { position:absolute; z-index:-1; inset:0; content:""; background:linear-gradient(115deg,rgba(9,29,54,.98),rgba(17,62,96,.83)); }
+        .home-news-card::after { position:absolute; z-index:-1; width:150px; height:150px; right:-28px; bottom:-65px; border:1px solid rgba(255,255,255,.24); border-radius:50%; content:""; box-shadow:0 0 0 17px rgba(255,255,255,.04),0 0 0 35px rgba(255,255,255,.035); }
+        .home-news-card--match::before { background:linear-gradient(115deg,#0e3458,#096c79); }
+        .home-news-card--prediction::before { background:linear-gradient(115deg,#d94c45,#a8213d); }
+        .home-news-card--league::before { background:linear-gradient(115deg,#443171,#174674); }
+        .home-news-card-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .home-news-tag { border:1px solid rgba(255,255,255,.27); border-radius:999px; background:rgba(255,255,255,.12); padding:5px 8px; color:#fff; font-size:8px; font-weight:900; letter-spacing:.12em; }
+        .home-news-emoji { font-size:32px; filter:drop-shadow(0 7px 10px rgba(0,0,0,.2)); }
+        .home-news-title { display:block; max-width:82%; color:#fff!important; font-size:17px; font-weight:950; line-height:1.12; letter-spacing:-.025em; }
+        .home-news-link { margin-top:6px; color:rgba(255,255,255,.8)!important; font-size:10px; font-weight:750; }
+        .home-wheel-promo { position:relative; display:flex; min-height:126px; align-items:center; justify-content:space-between; gap:12px; overflow:hidden; margin-bottom:20px; padding:18px 18px 18px 20px; border-radius:22px; background:linear-gradient(110deg,#0ba5d9 0%,#06b6d4 54%,#41d6b4 100%); color:white; box-shadow:0 14px 32px rgba(6,165,217,.2); }
+        .home-wheel-copy { position:relative; z-index:2; max-width:65%; }
+        .home-wheel-copy p { margin:0; color:rgba(255,255,255,.82); font-size:9px; font-weight:950; letter-spacing:.15em; }
+        .home-wheel-copy h2 { margin:6px 0 0; color:#fff!important; font-size:19px; font-weight:950; line-height:1.12; letter-spacing:-.035em; }
+        .home-wheel-copy button { margin-top:11px; border:1px solid rgba(255,255,255,.35); border-radius:999px; background:rgba(255,255,255,.18); padding:7px 11px; color:#fff; font-size:10px; font-weight:900; }
+        .home-wheel-art { position:relative; display:grid; width:92px; height:92px; flex:0 0 92px; place-items:center; border:5px solid rgba(255,255,255,.85); border-radius:50%; background:conic-gradient(#facc15 0 15%,#f472b6 15% 30%,#8b5cf6 30% 45%,#22c55e 45% 60%,#fb923c 60% 75%,#ef4444 75% 90%,#facc15 90%); box-shadow:0 8px 22px rgba(8,74,99,.25); transform:rotate(-12deg); }
+        .home-wheel-art::before { position:absolute; top:-11px; left:50%; z-index:2; width:0; height:0; border-right:8px solid transparent; border-bottom:14px solid #fff; border-left:8px solid transparent; content:""; transform:translateX(-50%); }
+        .home-wheel-art span { display:grid; width:34px; height:34px; place-items:center; border:3px solid #fff; border-radius:50%; background:#12304c; color:#fff; font-size:14px; transform:rotate(12deg); }
+        .home-live-panel { overflow:hidden; margin-bottom:22px; border:1px solid #e3e9ed; border-radius:22px; background:rgba(255,255,255,.96); box-shadow:0 10px 28px rgba(15,39,71,.055); }
+        .home-live-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px 17px 11px; }
+        .home-live-heading h2 { margin:0; color:#152a42; font-size:16px; font-weight:950; letter-spacing:-.03em; }
+        .home-live-heading a { color:#167c9a; font-size:10px; font-weight:900; text-decoration:none; }
+        .home-score-row { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto; align-items:center; gap:7px; border-top:1px solid #edf0f2; padding:11px 14px; color:#1a2c40; }
+        .home-score-team { display:flex; min-width:0; align-items:center; gap:7px; font-size:10px; font-weight:850; }
+        .home-score-row > .home-score-team:nth-of-type(3) { justify-content:flex-end; text-align:right; }
+        .home-score-team img { width:22px; height:22px; flex:0 0 22px; object-fit:contain; }
+        .home-score-team span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .home-score-value { white-space:nowrap; color:#1a2c40; font-size:12px; font-weight:950; }
+        .home-score-state { min-width:50px; border-radius:999px; background:#f1f4f5; padding:5px 7px; color:#6b7784; text-align:center; font-size:8px; font-weight:950; }
+        .home-score-state.is-live { background:#fff0ef; color:#d63b3b; }
+        .home-empty-score { padding:16px 17px 18px; color:#7c8994; font-size:11px; font-weight:700; }
+        .home-header-icon { display:grid; width:38px; height:38px; flex:0 0 38px; place-items:center; border:1px solid #e6eaed; border-radius:50%; background:#fff; color:#17304a; font-size:22px; line-height:1; }
+        .home-notification-dot { position:absolute; top:7px; right:8px; width:7px; height:7px; border:1px solid #fff; border-radius:50%; background:#ed4b4b; }
+        .home-welcome-banner { min-height:unset!important; border-radius:22px!important; }
+        .home-welcome-banner h2 { font-size:clamp(24px,5vw,38px)!important; }
+        .home-welcome-banner .home-welcome-copy { max-width:560px; }
+        .mobile-bottom-nav { padding-bottom:calc(8px + env(safe-area-inset-bottom)); }
+        @media (max-width: 640px) {
+          .app-shell { padding-left: 12px; padding-right: 12px; }
+          .hero-modern { border-radius: 20px !important; }
+          .hero-modern h2 { font-size: 27px; }
+          .home-news-strip { margin-top:0; }
+          .home-news-track { grid-auto-columns:minmax(255px,82vw); }
+          .home-wheel-promo { min-height:118px; padding:15px; }
+          .home-wheel-art { width:78px; height:78px; flex-basis:78px; }
+          .home-wheel-copy { max-width:66%; }
+          .home-wheel-copy h2 { font-size:17px; }
+          .home-score-row { gap:5px; padding:10px 11px; }
+          .home-score-team { gap:5px; font-size:9px; }
+          .home-score-team img { width:19px; height:19px; flex-basis:19px; }
+          .home-score-state { min-width:43px; font-size:7px; }
+          .home-header-icon { width:34px; height:34px; flex-basis:34px; }
+        }
+      `}</style>
       <div className="app-shell page-content-bottom mx-auto max-w-7xl px-3 py-4 sm:px-6 sm:py-7 lg:px-8">
-        <section className="hero-shadow hero-modern relative overflow-hidden rounded-[28px] bg-[#0a2342] sm:rounded-[34px]">
+        <section className="home-news-strip" aria-label="Futbol gündemi ve hızlı erişim">
+          <div className="home-section-heading">
+            <div>
+              <p className="home-section-kicker">Skor Durağı · Futbol güncesi</p>
+              <h2 className="home-section-title">Sahadan öne çıkanlar</h2>
+            </div>
+            <span className="home-section-kicker">Kaydır →</span>
+          </div>
+          <div className="home-news-track">
+            <Link href="#match-center" className="home-news-card home-news-card--match">
+              <div className="home-news-card-top">
+                <span className="home-news-tag">MAÇ GÜNDEMİ</span>
+                <span className="home-news-emoji" aria-hidden="true">⚽</span>
+              </div>
+              <div>
+                <strong className="home-news-title">
+                  {homeSpotlightMatches[0]
+                    ? `${homeSpotlightMatches[0].home_team} – ${homeSpotlightMatches[0].away_team}`
+                    : "Bugünün maçlarını keşfet"}
+                </strong>
+                <span className="home-news-link">Maç merkezi <span aria-hidden="true">→</span></span>
+              </div>
+            </Link>
+            <Link href="/tahmin" className="home-news-card home-news-card--prediction">
+              <div className="home-news-card-top">
+                <span className="home-news-tag">TAHMİN ZAMANI</span>
+                <span className="home-news-emoji" aria-hidden="true">🎯</span>
+              </div>
+              <div>
+                <strong className="home-news-title">Tahminini yap, puan yarışına katıl</strong>
+                <span className="home-news-link">Tahminlere göz at <span aria-hidden="true">→</span></span>
+              </div>
+            </Link>
+            <Link href="/siralama" className="home-news-card home-news-card--league">
+              <div className="home-news-card-top">
+                <span className="home-news-tag">PUAN YARIŞI</span>
+                <span className="home-news-emoji" aria-hidden="true">🏆</span>
+              </div>
+              <div>
+                <strong className="home-news-title">Sıralamadaki yerini takip et</strong>
+                <span className="home-news-link">Puan tablosu <span aria-hidden="true">→</span></span>
+              </div>
+            </Link>
+          </div>
+        </section>
+
+        <section className="home-wheel-promo" aria-label="Ödül çarkı">
+          <div className="home-wheel-copy">
+            <p>BUGÜNÜN ŞANSLI ÇARKI</p>
+            <h2>Çevir, puan kazanma şansını yakala!</h2>
+            <button type="button" onClick={() => document.getElementById("reward-wheel")?.scrollIntoView({ behavior: "smooth" })}>
+              Çarkı keşfet <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <div className="home-wheel-art" aria-hidden="true"><span>⚡</span></div>
+        </section>
+
+        <section className="home-live-panel" aria-label="Canlı maçlar ve skorlar">
+          <div className="home-live-heading">
+            <div>
+              <p className="home-section-kicker">SAHADAN</p>
+              <h2>Canlı maçlar ve skorlar</h2>
+            </div>
+            <a href="#match-center">Tüm maçlar <span aria-hidden="true">→</span></a>
+          </div>
+          {homeSpotlightMatches.length > 0 ? homeSpotlightMatches.map((match) => {
+            const isLiveNow = match.status === "live" || match.status === "halftime";
+            return (
+              <button key={match.id} type="button" onClick={() => setSelectedMatch(match)} className="home-score-row w-full text-left">
+                <span className="home-score-team">
+                  {match.home_logo_url ? <img src={match.home_logo_url} alt="" /> : <span aria-hidden="true">⚽</span>}
+                  <span>{match.home_team}</span>
+                </span>
+                <span className="home-score-value">{match.home_score ?? "–"} : {match.away_score ?? "–"}</span>
+                <span className="home-score-team">
+                  <span>{match.away_team}</span>
+                  {match.away_logo_url ? <img src={match.away_logo_url} alt="" /> : <span aria-hidden="true">⚽</span>}
+                </span>
+                <span className={`home-score-state${isLiveNow ? " is-live" : ""}`}>
+                  {isLiveNow ? (match.status === "halftime" ? "DEVRE" : "CANLI") : match.kickoff?.slice(11, 16) || "PROGRAM"}
+                </span>
+              </button>
+            );
+          }) : (
+            <div className="home-empty-score">Şu anda öne çıkarılacak maç yok. Fikstürü görmek için tüm maçlara göz at.</div>
+          )}
+        </section>
+
+        <section className="hero-shadow hero-modern home-welcome-banner relative overflow-hidden rounded-[28px] bg-[#0a2342] sm:rounded-[34px]">
           <div className="relative px-5 py-8 sm:px-9 sm:py-11 lg:px-12 lg:py-12">
             <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-blue-400/20 blur-3xl" />
 
             <div className="relative">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-200">
-                  Hoş Geldin
+                <span className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                  SKOR DURAĞI'na HOŞGELDİN
                 </span>
-
                 {confirmedUpcoming > 0 && (
-                  <span className="rounded-full bg-emerald-400/15 px-3 py-1.5 text-[10px] font-bold text-emerald-200">
+                  <span className="rounded-full bg-white/15 px-3 py-1.5 text-[10px] font-bold text-white">
                     {confirmedUpcoming} maç tahmine açık
                   </span>
                 )}
               </div>
-
               <h2 className="page-title mt-4 max-w-2xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
                 {profile.display_name || "Oyuncu"}
               </h2>
-
-              <p className="mt-2 max-w-2xl text-2xl font-black tracking-tight text-white sm:text-4xl">
-                Maçını seç, tahminini yap.
+              <p className="home-welcome-copy mt-3 max-w-2xl text-sm font-semibold leading-6 text-white sm:text-base">
+                Maçları takip et, tahminlerini yap ve Skor Durağı puan sıralamasında yüksel.
               </p>
-
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Maçları takip et, doğru skorları yakala ve puan
-                tablosunda yüksel.
-              </p>
-
-              <div className="mt-6 flex flex-col gap-2.5 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => (window.location.href = "/tahmin")}
-                  className="rounded-2xl bg-white px-5 py-3.5 text-sm font-extrabold text-[#0f2747] shadow-lg shadow-black/10 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-50"
-                >
-                  🎯 Tahmin Yap
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button type="button" onClick={() => { setSelectedDate("all"); document.getElementById("match-center")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="rounded-2xl bg-[#DC2626] px-4 py-3.5 text-sm font-black text-white shadow-lg transition duration-200 hover:-translate-y-0.5 hover:bg-red-700 active:translate-y-0">
+                  🎯 Tahmine Açık Maçlar
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => (window.location.href = "/siralama")}
-                  className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3.5 text-sm font-extrabold text-white backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:bg-white/15"
-                >
+                <button type="button" onClick={() => (window.location.href = "/siralama")} className="rounded-2xl bg-[#DC2626] px-4 py-3.5 text-sm font-black text-white shadow-lg transition duration-200 hover:-translate-y-0.5 hover:bg-red-700 active:translate-y-0">
                   🏆 Sıralamayı Gör
+                </button>
+                <button type="button" onClick={() => { setMenuPanel("standings"); void loadPublicFootballCenterData(); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-2xl bg-[#DC2626] px-4 py-3.5 text-sm font-black text-white shadow-lg transition duration-200 hover:-translate-y-0.5 hover:bg-red-700 active:translate-y-0">
+                  📊 Canlı Puan Durumu
                 </button>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="mt-5 grid grid-cols-2 gap-3 sm:mt-6 sm:grid-cols-4">
-          <div className="modern-card stat-card rounded-[22px] p-4 sm:p-5">
+        <section className="mt-5 grid grid-cols-4 gap-1.5 sm:mt-6 sm:gap-3">
+          <div className="modern-card stat-card min-w-0 rounded-xl bg-[#808080] p-2 sm:rounded-2xl sm:p-3">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[9px] font-black uppercase tracking-tight text-black sm:text-[10px]">
                 Toplam Puan
               </p>
               <span className="text-lg">⚡</span>
             </div>
 
-            <p className="mt-3 text-3xl font-black tracking-tight text-[#0f2747] sm:text-4xl">
+            <p className="mt-1 text-lg font-black tracking-tight text-black sm:text-2xl">
               {totalPoints}
             </p>
 
-            <p className="mt-1 text-[10px] font-medium text-blue-600">
+            <p className="mt-1 text-[8px] font-black leading-tight text-black sm:text-[10px]">
               Tahmin puanı
             </p>
           </div>
 
-          <div className="modern-card stat-card rounded-[22px] p-4 sm:p-5">
+          <div className="modern-card stat-card min-w-0 rounded-xl bg-[#808080] p-2 sm:rounded-2xl sm:p-3">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[9px] font-black uppercase tracking-tight text-black sm:text-[10px]">
                 Tahmin
               </p>
               <span className="text-lg">🎯</span>
             </div>
 
-            <p className="mt-3 text-3xl font-black tracking-tight text-[#0f2747] sm:text-4xl">
+            <p className="mt-1 text-lg font-black tracking-tight text-black sm:text-2xl">
               {predictions.length}
             </p>
 
-            <p className="mt-1 text-[10px] font-medium text-slate-400">
+            <p className="mt-1 text-[8px] font-black leading-tight text-black sm:text-[10px]">
               Yapılan tahmin
             </p>
           </div>
 
-          <div className="modern-card stat-card rounded-[22px] p-4 sm:p-5">
+          <div className="modern-card stat-card min-w-0 rounded-xl bg-[#808080] p-2 sm:rounded-2xl sm:p-3">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[9px] font-black uppercase tracking-tight text-black sm:text-[10px]">
                 Tam İsabet
               </p>
               <span className="text-lg">🎯</span>
             </div>
 
-            <p className="mt-3 text-3xl font-black tracking-tight text-[#0f2747] sm:text-4xl">
+            <p className="mt-1 text-lg font-black tracking-tight text-black sm:text-2xl">
               {exactScores}
             </p>
 
-            <p className="mt-1 text-[10px] font-medium text-slate-400">
+            <p className="mt-1 text-[8px] font-black leading-tight text-black sm:text-[10px]">
               20 puanlık skor
             </p>
           </div>
 
-          <div className="modern-card stat-card rounded-[22px] p-4 sm:p-5">
+          <div className="modern-card stat-card min-w-0 rounded-xl bg-[#808080] p-2 sm:rounded-2xl sm:p-3">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[9px] font-black uppercase tracking-tight text-black sm:text-[10px]">
                 Bonus
               </p>
               <span className="text-lg">🔥</span>
             </div>
 
-            <p className="mt-3 text-3xl font-black tracking-tight text-[#0f2747] sm:text-4xl">
+            <p className="mt-1 text-lg font-black tracking-tight text-black sm:text-2xl">
               {bonusPoints + bonusCodePoints + wheelPoints}
             </p>
 
-            <p className="mt-1 text-[10px] font-medium text-slate-400">
+            <p className="mt-1 text-[8px] font-black leading-tight text-black sm:text-[10px]">
               Bonus ve ödül puanı
             </p>
           </div>
@@ -2744,7 +3024,7 @@ export default function HomePage() {
         {/* BONUS SORULARI */}
         {/* ====================================================== */}
         {false && (
-        <section className="mt-5">
+        <section id="reward-wheel" className="mt-5 scroll-mt-24">
           <div className="section-panel overflow-hidden rounded-[24px] border border-amber-100 bg-white shadow-sm">
             <div className="bg-gradient-to-r from-[#0f2747] to-blue-700 px-5 py-5 sm:px-6">
               <div className="flex items-center gap-3">
@@ -2754,7 +3034,7 @@ export default function HomePage() {
                   <h2 className="mt-1 text-lg font-extrabold text-white sm:text-xl">Bonus Soruları</h2>
                 </div>
               </div>
-              <p className="mt-3 text-sm leading-5 text-blue-100/80">Bonus sorularını cevapla ve doğru bildiğinde ekstra puan kazan.</p>
+              <p className="mt-3 text-sm font-bold leading-5 text-black">Bonus sorularını cevapla ve doğru bildiğinde ekstra puan kazan.</p>
             </div>
             <div className="space-y-4 p-5 sm:p-6">
               {bonusQuestions.length === 0 ? (
@@ -2976,13 +3256,13 @@ export default function HomePage() {
         {/* ÖDÜL ÇARKI */}
         {/* ====================================================== */}
         <section className="mt-5">
-          <div className="section-panel overflow-hidden rounded-[24px] border border-pink-100 bg-white shadow-sm">
-            <div className="bg-gradient-to-r from-[#0f2747] via-indigo-700 to-fuchsia-600 px-5 py-5 sm:px-6">
+          <div className="section-panel reward-wheel-panel overflow-hidden rounded-[24px] border border-slate-300 bg-[#808080] text-black shadow-sm">
+            <div className="bg-[#808080] px-5 py-5 text-black sm:px-6">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 text-2xl">🎡</div>
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-pink-200">Şansını Dene</p>
-                  <h2 className="mt-1 text-lg font-extrabold text-white sm:text-xl">Ödül Çarkı</h2>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-black">Şansını Dene</p>
+                  <h2 className="mt-1 text-lg font-extrabold text-black sm:text-xl">Ödül Çarkı</h2>
                 </div>
               </div>
               <p className="mt-3 text-sm leading-5 text-blue-100/80">Çarkı çevir, 5–30 puan arasında ödül kazan veya boş dilime denk gel.</p>
@@ -3066,7 +3346,7 @@ export default function HomePage() {
         {/* MAÇ MERKEZİ */}
         {/* ====================================================== */}
 
-        <section className="mt-8 sm:mt-10">
+        <section id="match-center" className="mt-8 scroll-mt-24 sm:mt-10">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-blue-600">
@@ -3285,14 +3565,20 @@ export default function HomePage() {
                 const isHalftime = match.status === "halftime";
 
                 const canPredict = isPredictionOpen(match);
+                const leagueLogoUrl = match.league_logo_url || publicLeagues.find((league) =>
+                  String(league.name || "").trim().toLocaleLowerCase("tr-TR") === String(match.league || "").trim().toLocaleLowerCase("tr-TR")
+                )?.logo_url || null;
 
                 return (
                   <article
                     key={match.id}
                     onClick={() => openMatchDetails(match)}
-                    className="modern-card match-card match-clickable overflow-hidden rounded-[26px]"
+                    style={{ "--match-card-bg": match.card_background_color || "#FFFFFF" } as React.CSSProperties}
+                    className="modern-card match-card match-clickable relative overflow-hidden rounded-[26px]"
                   >
-                    <div className="border-b border-slate-100/80 bg-white/70 px-4 py-4 sm:px-6">
+                    {leagueLogoUrl && <div aria-hidden="true" className="match-league-watermark" style={{ backgroundImage: `url("${leagueLogoUrl}")` }} />}
+                    {match.featured_on_home && <span className="match-featured-badge">★ ÖNE ÇIKAN</span>}
+                    <div className="relative z-[1] border-b border-slate-100/80 bg-white/70 px-4 py-4 sm:px-6">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
@@ -3361,7 +3647,7 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    <div className="px-4 py-6 sm:px-7 sm:py-8">
+                    <div className="relative z-[1] px-4 py-6 sm:px-7 sm:py-8">
                       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 sm:gap-8">
                         <div className="flex min-w-0 flex-col items-center text-center">
                           <TeamLogo
@@ -3381,12 +3667,12 @@ export default function HomePage() {
                         <div className="flex min-w-[52px] flex-col items-center pt-3 text-center sm:pt-5">
                           {isFinished || isLive || isHalftime ? (
                             <>
-                              <div className={`rounded-2xl px-4 py-3 shadow-lg sm:px-6 ${isLive || isHalftime ? "bg-gradient-to-br from-red-600 to-red-500" : "bg-gradient-to-br from-[#0f2747] to-[#164d86]"}`}>
-                                <p className="text-xl font-extrabold text-white sm:text-2xl">
+                              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-6">
+                                <p className="text-xl font-black text-black sm:text-2xl">
                                   {getLiveScoreText(match)}
                                 </p>
                                 {(isLive || isHalftime) && (
-                                  <p className="mt-1 text-center text-sm font-black text-white">
+                                  <p className="mt-1 text-center text-sm font-black text-black">
                                     {getLiveMinuteText(match)}
                                   </p>
                                 )}
@@ -3588,8 +3874,10 @@ export default function HomePage() {
                 >
                   <div className="flex items-center justify-between border-b border-slate-200 bg-[#0f2747] px-4 py-3.5 sm:px-5">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm">
-                        ⚽
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 shadow-sm">
+                        {publicLeagues.find((item) => String(item.name || "").trim().toLocaleLowerCase("tr-TR") === String(league || "").trim().toLocaleLowerCase("tr-TR"))?.logo_url ? (
+                          <img src={publicLeagues.find((item) => String(item.name || "").trim().toLocaleLowerCase("tr-TR") === String(league || "").trim().toLocaleLowerCase("tr-TR"))!.logo_url!} alt={`${league} logosu`} className="h-full w-full object-contain" />
+                        ) : <span className="text-xl">⚽</span>}
                       </div>
 
                       <div className="min-w-0">
@@ -3620,12 +3908,16 @@ export default function HomePage() {
                       const isHalftime = match.status === "halftime";
 
                       const canPredict = isPredictionOpen(match);
+                      const leagueLogoUrl = match.league_logo_url || publicLeagues.find((item) =>
+                        String(item.name || "").trim().toLocaleLowerCase("tr-TR") === String(match.league || "").trim().toLocaleLowerCase("tr-TR")
+                      )?.logo_url || null;
 
                       return (
                         <div
                           key={match.id}
                           onClick={() => openMatchDetails(match)}
-                          className="list-row px-3 py-3.5 sm:px-5 sm:py-4"
+                          style={{ "--match-card-bg": match.card_background_color || "#FFFFFF" } as React.CSSProperties}
+                          className={`list-row px-3 py-3.5 sm:px-5 sm:py-4 ${match.featured_on_home ? "match-featured-row" : ""}`}
                         >
                           <div className="hidden items-center gap-4 md:grid md:grid-cols-[80px_minmax(0,1fr)_90px_minmax(0,1fr)_auto]">
                             <div className="text-center">
@@ -4141,12 +4433,12 @@ export default function HomePage() {
 
             <div className="mx-auto max-w-6xl p-3 sm:p-6 lg:p-8">
               {/* SKOR SAHNESİ */}
-              <section className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#071a31] via-[#0f3158] to-[#124f86] p-5 text-white shadow-xl sm:p-8">
-                <div className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full bg-blue-400/10 blur-3xl" />
-                <div className="pointer-events-none absolute -bottom-24 -left-20 h-56 w-56 rounded-full bg-cyan-300/10 blur-3xl" />
+              <section className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white p-5 text-black shadow-xl sm:p-8">
+                <div className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full bg-slate-200/30 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-24 -left-20 h-56 w-56 rounded-full bg-slate-200/30 blur-3xl" />
 
-                <div className="relative flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-blue-100">
+                <div className="relative flex items-center justify-between gap-2 text-black">
+                  <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-black">
                     {selectedIsLive || selectedIsHalftime ? (
                       <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /> CANLI</>
                     ) : selectedIsFinished ? (
@@ -4157,12 +4449,15 @@ export default function HomePage() {
                       <>PROGRAM</>
                     )}
                   </div>
-                  <span className="text-[10px] font-bold text-white/50">{formatOnlyDate(selectedMatch.kickoff, selectedMatch.match_date)}</span>
+                  <span className="text-[10px] font-bold text-black">{formatOnlyDate(selectedMatch.kickoff, selectedMatch.match_date)}</span>
                 </div>
 
-                <div className="relative mt-7 grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-8">
+                <div className="relative mt-5 flex justify-center">
+                  <button type="button" onClick={() => { setLineupTeam("home"); setLineupTab("probable"); setLineupOpen(true); }} className="rounded-xl bg-[#0000FF] px-5 py-2.5 text-sm font-black text-white shadow-md transition hover:bg-blue-700">👥 Kadroya Bak</button>
+                </div>
+                <div className="relative mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-8">
                   <div className="flex min-w-0 flex-col items-center text-center">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-white p-3 shadow-lg sm:h-24 sm:w-24">
+                    <div className="flex h-20 w-20 items-center justify-center sm:h-24 sm:w-24">
                       <TeamLogo url={selectedMatch.home_logo_url} team={selectedMatch.home_team} />
                     </div>
                     <p className="mt-4 max-w-[150px] break-words text-sm font-black leading-5 sm:max-w-[230px] sm:text-lg">
@@ -4192,7 +4487,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="flex min-w-0 flex-col items-center text-center">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-white p-3 shadow-lg sm:h-24 sm:w-24">
+                    <div className="flex h-20 w-20 items-center justify-center sm:h-24 sm:w-24">
                       <TeamLogo url={selectedMatch.away_logo_url} team={selectedMatch.away_team} />
                     </div>
                     <p className="mt-4 max-w-[150px] break-words text-sm font-black leading-5 sm:max-w-[230px] sm:text-lg">
@@ -4234,7 +4529,7 @@ export default function HomePage() {
 
               {/* OLAYLAR */}
               {getMatchEvents(selectedMatch.id).length > 0 && (
-                <section className="mt-3 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm sm:mt-4">
+                <section className="match-events-panel mt-3 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm sm:mt-4">
                   <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-5">
                     <div>
                       <p className="text-[8px] font-black uppercase tracking-[0.18em] text-blue-600">Maç akışı</p>
@@ -4263,12 +4558,14 @@ export default function HomePage() {
                               {events.map((event) => {
                                 const icon = event.event_type === "goal" ? "⚽" : event.event_type === "yellow_card" ? "🟨" : event.event_type === "red_card" ? "🟥" : "🔄";
                                 const title = event.event_type === "substitution" ? `${event.player_out || "Oyuncu"} → ${event.player_in || "Oyuncu"}` : event.player_name || "Oyuncu";
+                                const eventDetail = event.event_type === "goal" && event.assist_player_name ? `Asist: ${event.assist_player_name}` : (event.event_type === "yellow_card" || event.event_type === "red_card") && event.card_reason ? `Kart nedeni: ${event.card_reason}` : event.event_type === "substitution" && event.team_name ? `Takım: ${event.team_name}` : event.team_name || "";
                                 return (
                                   <div key={event.id} className={`flex items-center gap-2 rounded-2xl border border-white bg-white px-2.5 py-2.5 shadow-sm ${isHome ? "text-left" : "justify-end text-right"}`}>
                                     {isHome && <span className="shrink-0 text-sm">{icon}</span>}
                                     <div className="min-w-0 flex-1">
                                       <p className="break-words text-[10px] font-black leading-4 text-[#0f2747] sm:text-xs">{title}</p>
-                                      <p className={`mt-0.5 text-[9px] font-black text-blue-600 ${isHome ? "text-left" : "text-right"}`}>{getEventMinuteText(event)}</p>
+                                      {eventDetail && <p className={`mt-0.5 break-words text-[9px] font-extrabold text-black ${isHome ? "text-left" : "text-right"}`}>{eventDetail}</p>}
+                                      <p className={`mt-0.5 text-[9px] font-black text-black ${isHome ? "text-left" : "text-right"}`}>{getEventMinuteText(event)}</p>
                                     </div>
                                     {!isHome && <span className="shrink-0 text-sm">{icon}</span>}
                                   </div>
@@ -4372,13 +4669,7 @@ export default function HomePage() {
                           <h3 className="mt-1 text-base font-black text-[#0f2747]">Maç Kadrosu</h3>
                           <p className="mt-1 text-[10px] font-semibold text-slate-400">Muhtemel 11, İlk 11 ve yedekleri görüntüle.</p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => { setLineupTeam("home"); setLineupTab("probable"); setLineupOpen(true); }}
-                          className="shrink-0 rounded-2xl bg-[#0f2747] px-5 py-3 text-xs font-black text-white shadow-lg transition hover:bg-[#17385f]"
-                        >
-                          👥 Kadro
-                        </button>
+                        <span className="text-xs font-black text-slate-500">Kadro bilgileri</span>
                       </div>
                     </section>
 
@@ -4465,15 +4756,6 @@ export default function HomePage() {
                   </div>
                 </section>
               )}
-
-              <section className="mt-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:mt-4 sm:p-5">
-                <p className="text-[8px] font-black uppercase tracking-[0.18em] text-purple-600">Gol seçenekleri</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {([
-                    ["home_under", "Ev - Gol"], ["home_over", "Ev + Gol"], ["away_under", "Deplasman - Gol"], ["away_over", "Deplasman + Gol"]
-                  ] as const).map(([key,label]) => { const active = Boolean(goalPredictions[selectedMatch.id]?.[key]); return <button key={key} type="button" onClick={() => saveGoalPrediction(selectedMatch.id,key)} className={`rounded-xl border px-3 py-3 text-xs font-black transition ${active ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-300"}`}>{active ? "✓ " : ""}{label}</button>; })}
-                </div>
-              </section>
 
               {/* AKSİYONLAR */}
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -4820,7 +5102,163 @@ main.min-h-screen .border-slate-200,main.min-h-screen .border-slate-100{border-c
 
 /* Yazıların arkasında renkli blok oluşmasın */
 main.min-h-screen h1,main.min-h-screen h2,main.min-h-screen h3,main.min-h-screen h4,main.min-h-screen h5,main.min-h-screen h6,main.min-h-screen p,main.min-h-screen strong,main.min-h-screen span,main.min-h-screen label{background-image:none!important;text-shadow:none!important}
-`}</style>
+
+/* ===== FINAL MATCH + STANDINGS COLOR OVERRIDE ===== */
+main.min-h-screen .match-card,
+main.min-h-screen .match-card > div,
+main.min-h-screen .match-card .bg-white,
+main.min-h-screen .match-card .bg-white\/70 {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+main.min-h-screen .match-card p,
+main.min-h-screen .match-card span,
+main.min-h-screen .match-card h1,
+main.min-h-screen .match-card h2,
+main.min-h-screen .match-card h3,
+main.min-h-screen .match-card strong,
+main.min-h-screen .match-card label {
+  color: #000000 !important;
+}
+
+/* Maç kartındaki skor kutusu okunaklı kalsın */
+main.min-h-screen .match-card .bg-gradient-to-br p.text-white,
+main.min-h-screen .match-card .bg-gradient-to-br span.text-white {
+  color: #ffffff !important;
+}
+
+/* Liste görünümü: beyaz satır + siyah yazı */
+main.min-h-screen .list-row,
+main.min-h-screen .list-row > div,
+main.min-h-screen .list-row .bg-white,
+main.min-h-screen .list-row .bg-slate-50,
+main.min-h-screen .list-row .bg-slate-100 {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+main.min-h-screen .list-row p,
+main.min-h-screen .list-row span,
+main.min-h-screen .list-row div {
+  color: #000000 !important;
+}
+main.min-h-screen .list-row:hover {
+  background: #ffffff !important;
+}
+
+/* Lig başlıkları KIRMIZI */
+main.min-h-screen .card-shadow > div.bg-\[\#0f2747\],
+main.min-h-screen .card-shadow > div[class*="bg-[#0f2747]"] {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+main.min-h-screen .card-shadow > div[class*="bg-[#0f2747]"] p,
+main.min-h-screen .card-shadow > div[class*="bg-[#0f2747]"] span {
+  color: #ffffff !important;
+}
+
+/* Kart görünümündeki lig etiketi de kırmızı */
+main.min-h-screen .match-card .bg-blue-50 {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+
+/* Tarih alanları beyaz + siyah */
+main.min-h-screen .date-strip,
+main.min-h-screen .date-chip {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+main.min-h-screen .date-chip * {
+  color: #000000 !important;
+}
+
+/* Canlı puan durumu: beyaz panel/tablo + siyah yazı */
+main.min-h-screen .public-standings-table {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+main.min-h-screen .public-standings-table thead {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+main.min-h-screen .public-standings-table thead th {
+  color: #ffffff !important;
+}
+main.min-h-screen .public-standings-table tbody,
+main.min-h-screen .public-standings-table tbody tr,
+main.min-h-screen .public-standings-table tbody td {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+main.min-h-screen .public-standings-table tbody tr {
+  border-color: #e5e7eb !important;
+}
+main.min-h-screen .public-standings-table tbody * {
+  color: #000000 !important;
+}
+
+/* Puan durumu Lig/Sezon seçim alanı */
+main.min-h-screen .public-standings-table ~ * {}
+main.min-h-screen .fixed.inset-0.z-\[120\] > div {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+main.min-h-screen .fixed.inset-0.z-\[120\] > div h2,
+main.min-h-screen .fixed.inset-0.z-\[120\] > div p,
+main.min-h-screen .fixed.inset-0.z-\[120\] > div label,
+main.min-h-screen .fixed.inset-0.z-\[120\] > div span {
+  color: #000000 !important;
+}
+main.min-h-screen .fixed.inset-0.z-\[120\] > div select {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border-color: #d1d5db !important;
+}
+
+/* ===== SKOR DURAĞI İSTENEN TASARIM KİLİDİ ===== */
+:global(body){background:#fff!important;color:#000!important}
+:global(.hero-modern){background:#00008B!important;color:#fff!important}
+:global(.hero-modern h1),:global(.hero-modern h2),:global(.hero-modern h3),:global(.hero-modern p),:global(.hero-modern span){color:#fff!important}
+:global(.hero-modern button){background:#DC2626!important;color:#fff!important;font-weight:900!important;border:0!important}
+:global(.hero-modern button:hover){background:#b91c1c!important}
+:global(.stat-card),:global(.modern-card.stat-card){background:#808080!important;border-color:#808080!important;color:#000!important;box-shadow:none!important}
+:global(.stat-card p),:global(.stat-card strong),:global(.stat-card span){color:#000!important;font-weight:900!important}
+:global(.reward-wheel-panel),:global(.reward-wheel-panel > div:first-child),:global(.reward-wheel-panel > div:nth-child(2)){background:#808080!important;color:#000!important;border-color:#808080!important}
+:global(.reward-wheel-panel p),:global(.reward-wheel-panel h2),:global(.reward-wheel-panel span),:global(.reward-wheel-panel label),:global(.reward-wheel-panel button){color:#000!important;font-weight:900!important}
+:global(.reward-wheel-panel button){border-color:#555!important}
+:global(.reward-wheel-panel .text-white){color:#000!important}
+:global(.skor-menu-grid){display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;grid-auto-flow:row!important;align-content:start!important;gap:8px!important}
+:global(.skor-menu-grid > button){display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:7px!important;min-width:0!important;width:100%!important;min-height:54px!important;margin:0!important;padding:9px 8px!important;white-space:normal!important;overflow-wrap:anywhere!important;border-radius:12px!important;background:#0000FF!important;color:#fff!important;border:1px solid #0000FF!important;font-size:11px!important;line-height:1.25!important;font-weight:900!important;text-align:left!important}
+:global(.skor-menu-grid > button span){color:#fff!important;font-weight:900!important}
+:global(.skor-menu-grid > .sidebar-admin){grid-column:1/-1!important;grid-row:1!important;justify-content:center!important;font-size:14px!important}
+:global(.skor-menu-grid > .sidebar-notifications){grid-column:1/-1!important;grid-row:auto!important;justify-content:space-between!important;margin-top:8px!important}
+:global(.skor-menu-grid > .sidebar-standings),:global(.skor-menu-grid > .sidebar-player-stats),:global(.skor-menu-grid > .sidebar-theme){display:none!important}
+:global(.match-card){background:var(--match-card-bg,#FFFFFF)!important;color:#000!important;border:1px solid #e5e7eb!important}
+:global(.match-card > div){background:transparent!important;border-color:#e5e7eb!important}
+:global(.match-card p),:global(.match-card h2),:global(.match-card h3),:global(.match-card label),:global(.match-card .text-\[\#0f2747\]),:global(.match-card .text-slate-400),:global(.match-card .text-slate-500){color:#000!important;font-weight:900!important}
+:global(.match-card .text-white){color:#fff!important}
+:global(.match-league-watermark){position:absolute!important;right:10px!important;top:36px!important;width:clamp(110px,22vw,210px)!important;height:clamp(110px,22vw,210px)!important;background-position:center!important;background-repeat:no-repeat!important;background-size:contain!important;opacity:.12!important;pointer-events:none!important;z-index:0!important}
+:global(.match-featured-badge){position:absolute!important;right:12px!important;top:8px!important;z-index:5!important;border-radius:999px!important;padding:5px 9px!important;background:#DC2626!important;color:#fff!important;font-size:9px!important;font-weight:900!important;letter-spacing:.04em!important}
+:global(.match-featured-row){border:2px solid #DC2626!important}
+:global(.match-card.match-clickable){background-color:var(--match-card-bg,#FFFFFF)!important}
+:global(.match-card .match-league-watermark){opacity:.12!important}
+:global(.list-row){background:#FFFFFF!important;color:#DC2626!important;border-color:#e5e7eb!important;font-weight:900!important}
+:global(.list-row p),:global(.list-row span),:global(.list-row .text-\[\#0f2747\]),:global(.list-row .text-slate-400),:global(.list-row .text-blue-600){color:#DC2626!important;font-weight:900!important}
+:global(.list-row .text-white){color:#DC2626!important}
+:global(.list-row .bg-red-600),:global(.list-row .bg-\[\#0f2747\]){background:#fff!important;color:#DC2626!important;border:1px solid #DC2626!important}
+:global(.list-row .text-white){color:#DC2626!important}
+:global(.match-detail-page){background:#fff!important;color:#000!important}
+:global(.match-detail-page > div.sticky){background:#fff!important;color:#000!important;border-color:#e5e7eb!important;box-shadow:0 4px 16px rgba(0,0,0,.06)!important}
+:global(.match-detail-page > div.sticky p),:global(.match-detail-page > div.sticky span){color:#000!important}
+:global(.match-detail-page > div.sticky button){background:#DC2626!important;color:#fff!important;border:0!important}
+:global(.match-detail-page > div.sticky button span){color:#fff!important}
+:global(.match-detail-page .bg-white){background:#fff!important}
+:global(.match-detail-page .text-white\/45),:global(.match-detail-page .text-white\/70),:global(.match-detail-page .text-white\/80){color:#000!important}
+:global(.match-detail-page .match-events-panel),:global(.match-detail-page .match-events-panel *){background-color:#fff!important;color:#000!important;font-weight:800!important}
+@media(max-width:640px){:global(.skor-menu-grid > button){min-height:50px!important;padding:7px 6px!important;font-size:10px!important}:global(.match-league-watermark){right:0!important;top:55px!important;width:120px!important;height:120px!important}}
+`}
+</style>
     </main>
   );
 }

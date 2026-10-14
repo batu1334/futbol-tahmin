@@ -1,14 +1,14 @@
 ﻿import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const API_URL = "https://v3.football.api-sports.io";
+const API_URL = "https://sportapi.ai/api";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SECRET_KEY!
 );
 
-const API_KEY = process.env.API_FOOTBALL_KEY!;
+const API_KEY = process.env.SPORTAPI_API_KEY!;
 
 type ApiEvent = {
   time?: {
@@ -35,6 +35,7 @@ type ApiEvent = {
 type MatchRow = {
   id: number;
   api_fixture_id: number | null;
+  sportapi_fixture_id: number | null;
   home_team: string | null;
   away_team: string | null;
   home_team_id: number | null;
@@ -98,22 +99,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function getApiEvents(fixtureId: number) {
-  const response = await fetch(
-    `${API_URL}/fixtures/events?fixture=${fixtureId}`,
-    {
-      method: "GET",
-      headers: {
-        "x-apisports-key": API_KEY,
-      },
-      cache: "no-store",
-    }
-  );
+async function getApiEvents(
+  fixtureId: number,
+  homeTeam: string | null,
+  awayTeam: string | null
+): Promise<ApiEvent[]> {
+  const response = await fetch(`${API_URL}/fixtures/${fixtureId}/events`, {
+    method: "GET",
+    headers: { "X-Api-Key": API_KEY },
+    cache: "no-store",
+  });
 
   if (response.status === 429) {
-    const retryAfter =
-      response.headers.get("retry-after") ?? null;
-
+    const retryAfter = response.headers.get("retry-after");
     throw new Error(
       retryAfter
         ? `RATE_LIMIT_429|retry-after=${retryAfter}`
@@ -122,25 +120,55 @@ async function getApiEvents(fixtureId: number) {
   }
 
   if (!response.ok) {
-    throw new Error(
-      `API-Football events isteÄŸi baÅŸarÄ±sÄ±z: ${response.status}`
-    );
+    throw new Error(`SportAPI events isteği başarısız: ${response.status}`);
   }
 
   const json = await response.json();
+  if (json?.success !== true || !Array.isArray(json?.data)) return [];
 
-  return Array.isArray(json?.response)
-    ? json.response
-    : [];
+  return json.data
+    .filter((item: any) => {
+      const type = String(item?.event_type ?? "").toLowerCase();
+      return type.includes("goal") || type.includes("card");
+    })
+    .map((item: any): ApiEvent => {
+      const side = String(item?.team_side ?? "").toLowerCase();
+      const rawMinute = String(item?.minute ?? "0");
+      const parsedMinute = Number.parseInt(rawMinute, 10);
+      const rawType = String(item?.event_type ?? "").toLowerCase();
+      const detail = String(item?.extra_info ?? rawType);
+
+      return {
+        time: {
+          elapsed: Number.isFinite(parsedMinute) ? parsedMinute : 0,
+          extra: 0,
+        },
+        team: {
+          name: side === "home" ? homeTeam : side === "away" ? awayTeam : null,
+        },
+        player: { name: item?.player_name ?? null },
+        assist: { name: item?.assist_name ?? null },
+        type: rawType.includes("card") ? "Card" : "Goal",
+        detail,
+        comments: detail,
+      };
+    });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 500 });
+  }
+  if (request.headers.get("authorization") !== "Bearer " + secret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     if (!API_KEY) {
       return NextResponse.json(
         {
           ok: false,
-          error: "API_FOOTBALL_KEY bulunamadÄ±.",
+          error: "API_FOOTBALL_KEY bulunamadÃ„Â±.",
         },
         { status: 500 }
       );
@@ -150,7 +178,7 @@ export async function GET() {
       return NextResponse.json(
         {
           ok: false,
-          error: "SUPABASE_SECRET_KEY bulunamadÄ±.",
+          error: "SUPABASE_SECRET_KEY bulunamadÃ„Â±.",
         },
         { status: 500 }
       );
@@ -163,6 +191,7 @@ export async function GET() {
           `
           id,
           api_fixture_id,
+          sportapi_fixture_id,
           home_team,
           away_team,
           home_team_id,
@@ -171,14 +200,14 @@ export async function GET() {
           kickoff
         `
         )
-        .not("api_fixture_id", "is", null)
+        .not("sportapi_fixture_id", "is", null)
         .order("kickoff", {
           ascending: true,
         });
 
     if (matchesError) {
       throw new Error(
-        `Matches okunamadÄ±: ${matchesError.message}`
+        `Matches okunamadÃ„Â±: ${matchesError.message}`
       );
     }
 
@@ -186,8 +215,8 @@ export async function GET() {
       (matches ?? []) as MatchRow[];
 
     /*
-     * Sadece canlÄ± veya bitmiÅŸ maÃ§larÄ± alÄ±yoruz.
-     * Gelecekteki maÃ§lara events isteÄŸi atÄ±lmÄ±yor.
+     * Sadece canlÃ„Â± veya bitmiÃ…Å¸ maÃƒÂ§larÃ„Â± alÃ„Â±yoruz.
+     * Gelecekteki maÃƒÂ§lara events isteÃ„Å¸i atÃ„Â±lmÃ„Â±yor.
      */
     const eligibleMatches = allMatches.filter(
       (match) =>
@@ -196,8 +225,8 @@ export async function GET() {
     );
 
     /*
-     * API limitine takÄ±lmamak iÃ§in bir Ã§alÄ±ÅŸtÄ±rmada
-     * en fazla 8 maÃ§ iÅŸleniyor.
+     * API limitine takÃ„Â±lmamak iÃƒÂ§in bir ÃƒÂ§alÃ„Â±Ã…Å¸tÃ„Â±rmada
+     * en fazla 8 maÃƒÂ§ iÃ…Å¸leniyor.
      */
     const liveMatches = eligibleMatches.filter(
   (match) => isLiveStatus(match.status)
@@ -231,17 +260,15 @@ const matchesToProcess = [
     ) {
       const match = matchesToProcess[index];
 
-      const fixtureId = Number(
-        match.api_fixture_id
-      );
+      const fixtureId = Number(match.sportapi_fixture_id);
 
       if (!fixtureId) {
         continue;
       }
 
       /*
-       * API'yi arka arkaya boÄŸmamak iÃ§in
-       * istekler arasÄ±nda bekliyoruz.
+       * API'yi arka arkaya boÃ„Å¸mamak iÃƒÂ§in
+       * istekler arasÃ„Â±nda bekliyoruz.
        */
       if (index > 0) {
         await sleep(8000);
@@ -251,9 +278,7 @@ const matchesToProcess = [
 
       try {
         const apiEvents =
-          (await getApiEvents(
-            fixtureId
-          )) as ApiEvent[];
+          (await getApiEvents(fixtureId, match.home_team, match.away_team)) as ApiEvent[];
 
         if (apiEvents.length > 0) {
           matchesWithEvents++;
@@ -283,7 +308,7 @@ const matchesToProcess = [
 
         if (existingError) {
           throw new Error(
-            `Mevcut eventler okunamadÄ±: ${existingError.message}`
+            `Mevcut eventler okunamadÃ„Â±: ${existingError.message}`
           );
         }
 
@@ -433,7 +458,7 @@ const matchesToProcess = [
           }
 
           /*
-           * OYUNCU DEÄÄ°ÅÄ°KLÄ°ÄÄ°
+           * OYUNCU DEÃ„ÂÃ„Â°Ã…ÂÃ„Â°KLÃ„Â°Ã„ÂÃ„Â°
            */
           else if (
             apiType === "subst" ||
@@ -449,8 +474,8 @@ const matchesToProcess = [
               event.assist?.name ?? null;
 
             /*
-             * BazÄ± API cevaplarÄ±nda oyuna giren
-             * oyuncu comments/detail iÃ§inde gelebiliyor.
+             * BazÃ„Â± API cevaplarÃ„Â±nda oyuna giren
+             * oyuncu comments/detail iÃƒÂ§inde gelebiliyor.
              */
             if (
               !playerIn &&
@@ -557,8 +582,8 @@ const matchesToProcess = [
             : String(error);
 
         /*
-         * 429 geldiyse artÄ±k diÄŸer maÃ§lara
-         * istek atmÄ±yoruz.
+         * 429 geldiyse artÃ„Â±k diÃ„Å¸er maÃƒÂ§lara
+         * istek atmÃ„Â±yoruz.
          */
         if (
           errorMessage.startsWith(
@@ -637,3 +662,7 @@ const matchesToProcess = [
     );
   }
 }
+
+
+
+

@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import {
+  isMatchStatusPredictable,
+  isPredictionWindowOpen,
+} from "../../lib/match-predictions";
 
 type Match = {
   id: number;
@@ -283,19 +287,11 @@ export default function Home() {
   function isPredictionClosed(
     match: Match
   ) {
-    if (!match.schedule_confirmed) {
-      return true;
-    }
-
-    const kickoffTime = new Date(
-      match.kickoff
-    ).getTime();
-
-    const closeTime =
-      kickoffTime -
-      10 * 60 * 1000;
-
-    return Date.now() >= closeTime;
+    return (
+      !match.schedule_confirmed ||
+      !isMatchStatusPredictable(match.status) ||
+      !isPredictionWindowOpen(match.kickoff)
+    );
   }
 
   function openPrediction(
@@ -313,6 +309,11 @@ export default function Home() {
       setMessage(
         "🔒 Maç saati henüz kesinleşmedi."
       );
+      return;
+    }
+
+    if (!isMatchStatusPredictable(match.status)) {
+      setMessage("Bu maç için tahmin yapılamaz.");
       return;
     }
 
@@ -375,7 +376,7 @@ export default function Home() {
       return;
     }
 
-    if (match.status !== "scheduled") {
+    if (!isMatchStatusPredictable(match.status)) {
       setMessage(
         "Bu maç için tahmin yapılamaz."
       );
@@ -1407,6 +1408,8 @@ export default function Home() {
 
               const closed =
                 isPredictionClosed(match);
+              const statusPredictable =
+                isMatchStatusPredictable(match.status);
 
               return (
                 <div
@@ -1522,6 +1525,12 @@ export default function Home() {
                         Admin maç saatini
                         kesinleştirdiğinde
                         tahmin açılacak.
+                      </p>
+                    </div>
+                  ) : !statusPredictable ? (
+                    <div className="mt-5 rounded-xl border border-slate-700 bg-slate-800 p-4 text-center">
+                      <p className="font-semibold text-slate-300">
+                        Bu maç için tahmin yapılamaz.
                       </p>
                     </div>
                   ) : closed ? (

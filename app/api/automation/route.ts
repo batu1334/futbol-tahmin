@@ -2,13 +2,16 @@
 export const maxDuration = 300;
 const BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
-  "http://localhost:3000";
+  (process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
 
 async function runRoute(path: string) {
   try {
     const response = await fetch(`${BASE_URL}${path}`, {
       method: "GET",
       cache: "no-store",
+      headers: { Authorization: "Bearer " + (process.env.CRON_SECRET || "") },
     });
 
     const text = await response.text();
@@ -18,7 +21,7 @@ async function runRoute(path: string) {
     try {
       data = JSON.parse(text);
     } catch {
-      // JSON deÄŸilse metin olarak bÄ±rak
+      // JSON deÃ„Å¸ilse metin olarak bÃ„Â±rak
     }
 
     return {
@@ -42,22 +45,28 @@ async function runRoute(path: string) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 500 });
+  }
+  if (request.headers.get("authorization") !== "Bearer " + secret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const startedAt = Date.now();
 
   const results = [];
 
-  // 1. GÃ¼nlÃ¼k maÃ§lar + skorlar
+  // 1. Maçları SportAPI üzerinden senkronize et
   results.push(
     await runRoute("/api/football-sync")
   );
-
-  // 2. MaÃ§ olaylarÄ±
+// 2. MaÃƒÂ§ olaylarÃ„Â±
   results.push(
     await runRoute("/api/football-events-sync")
   );
 
-  // 3. Ä°lk 11 + yedekler
+  // 3. Ã„Â°lk 11 + yedekler
   results.push(
     await runRoute("/api/football-lineups-sync")
   );
@@ -70,4 +79,6 @@ export async function GET() {
     results,
   });
 }
+
+
 
